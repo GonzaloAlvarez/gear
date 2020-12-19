@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+
+echo "Removing [terraform]"
+sudo apt-get -y purge terraform
+sudo apt-add-repository --remove "deb [arch=amd64] https://apt.releases.hashicorp.com $(lsb_release -cs) main"
+sudo apt-get update

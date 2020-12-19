@@ -1,0 +1,42 @@
+#!/usr/bin/env bash
+
+__GEAR_PATH="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+__GEAR_COM_PATH="$__GEAR_PATH/com"
+__COMMAND="$1"
+__COMMAND_PATH="$(which $__COMMAND)"
+
+function _fail {
+    echo "$@"
+    exit 1
+}
+
+if [ -z "$__COMMAND_PATH" ]; then
+    __OS="$(uname -s)"
+    __OSSTR="linux"
+    if [ "$__OS" == "Darwin" ]; then
+        __OSSTR="darwin"
+    elif [ "$__OS" == "Linux" ]; then
+        if [ -f "/etc/debian_version" ]; then
+            __OSSTR="debian"
+        fi
+    fi
+    echo "[$__COMMAND] is not installed or not in path. Installing..."
+
+    __command_setup_script="$__GEAR_COM_PATH/${__COMMAND}/setup-${__OSSTR}"
+    echo "$__command_setup_script"
+    
+    if [ -x "$__command_setup_script" ]; then
+        $__command_setup_script
+        if [ $? -ne 0 ]; then
+            _fail "Could not install [$__COMMAND]"
+        fi
+        __COMMAND_PATH="$(which $__COMMAND)"
+        if [ -z "$__COMMAND_PATH" ]; then
+            _fail "Command [$__COMMAND] installation was not sucessful"
+        fi
+    else
+        _fail "Cannot install [$__COMMAND]  in [$__OSSTR]"
+    fi
+fi
+shift
+$__COMMAND_PATH $@

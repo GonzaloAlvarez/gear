@@ -1,0 +1,26 @@
+#!/usr/bin/env bash
+
+__GEAR_PATH="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+__GEAR_COM_PATH="$__GEAR_PATH/com"
+__OS="$(uname -s)"
+__OSSTR="linux"
+if [ "$__OS" == "Darwin" ]; then
+    __OSSTR="darwin"
+elif [ "$__OS" == "Linux" ]; then
+    if [ -f "/etc/debian_version" ]; then
+        __OSSTR="debian"
+    fi
+fi
+
+for i in ${__GEAR_COM_PATH}/*; do
+    __command="$(basename $i)"
+    echo "Removing [$__command]"
+    __command_path="$(which $__COMMAND)"
+    if [ "${__command_path}" ]; then
+        __remove_script="${__GEAR_COM_PATH}/${__command}/remove-${__OSSTR}"
+
+        if [ -x "${__remove_script}" ]; then
+            ${__remove_script}
+        fi
+    fi
+done
