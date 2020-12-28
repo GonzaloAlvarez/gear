@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+
+sudo apt-get -y purge gh
+sudo apt-add-repository --remove "deb [arch=amd64] https://cli.github.com/packages $(lsb_release -cs) main"
+sudo apt-get update
