@@ -23,10 +23,13 @@ if [ -z "$__COMMAND_PATH" ]; then
     echo "[$__COMMAND] is not installed or not in path. Installing..."
 
     __command_setup_script="$__GEAR_COM_PATH/${__COMMAND}/setup-${__OSSTR}"
-    echo "$__command_setup_script"
     
     if [ -x "$__command_setup_script" ]; then
-        $__command_setup_script
+        if [ -z "${debug+x}" ]; then
+            $__command_setup_script 2>&1 >/dev/null
+        else
+            $__command_setup_script
+        fi
         if [ $? -ne 0 ]; then
             _fail "Could not install [$__COMMAND]"
         fi

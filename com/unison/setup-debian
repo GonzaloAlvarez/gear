@@ -1,0 +1,34 @@
+#!/usr/bin/env bash
+
+export temp_path=$(mktemp -d)
+
+function cleanup {
+    rm -Rf "${temp_path}"
+    sudo apt-get -y purge build-essential
+    sudo apt-get -y autoremove 
+    set +e
+}
+
+set -e
+trap cleanup EXIT
+
+pushd . > /dev/null
+cd "${temp_path}"
+sudo apt-get -y install build-essential
+wget https://www.seas.upenn.edu/~bcpierce/unison/download/releases/unison-2.27.57/unison-2.27.57.tar.gz
+wget http://caml.inria.fr/pub/distrib/ocaml-3.12/ocaml-3.12.1.tar.gz
+tar xf ocaml-3.12.1.tar.gz
+tar xf unison-2.27.57.tar.gz
+cd ocaml-3.12.1
+./configure
+make world 
+make opt
+sudo make install
+cd ../unison-2.27.57
+sed -i '4s/.*/module NameMap : MyMap.S with type key = Name.t/' update.mli
+make
+sudo mkdir -p /usr/local/bin
+sudo mv ./unison /usr/local/bin
+cd ..
+popd  > /dev/null
+cleanup
