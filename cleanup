@@ -19,7 +19,7 @@ for i in ${__GEAR_COM_PATH}/*; do
         __remove_script="${__GEAR_COM_PATH}/${__command}/remove-${__OSSTR}"
 
         if [ -x "${__remove_script}" ]; then
-            echo "Removing [$__command]"
+            echo "Removing [${__command}]"
             ${__remove_script}
         fi
     fi
