@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+
+export temp_path=$(mktemp -d)
+
+function cleanup {
+    rm -Rf "${temp_path}"
+    set +e
+}
+
+set -e
+trap cleanup EXIT
+
+pushd . > /dev/null
+cd "${temp_path}"
+curl -LOJR https://github.com/bcpierce00/unison/releases/download/v2.51.3/unison-v2.51.3+ocaml-4.11.1+x86_64.macos-10.15.tar.gz
+tar xf unison-v2.51.3+ocaml-4.11.1+x86_64.macos-10.15.tar.gz
+sudo mkdir -p /usr/local/bin
+sudo cp bin/unison /usr/local/bin/unison
+cd ..
+popd  > /dev/null
+cleanup

@@ -38,7 +38,7 @@ if [ -z "$__COMMAND_PATH" ]; then
             _fail "Command [$__COMMAND] installation was not sucessful"
         fi
     else
-        _fail "Cannot install [$__COMMAND]  in [$__OSSTR]"
+        _fail "Cannot install [$__COMMAND] in [$__OSSTR]"
     fi
 fi
 shift
