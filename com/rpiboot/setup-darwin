@@ -1,0 +1,24 @@
+#!/usr/bin/env bash
+
+export temp_path=$(mktemp -d)
+
+function cleanup {
+    rm -Rf "${temp_path}"
+    set +e
+}
+
+set -e
+trap cleanup EXIT
+
+brew install libusb
+
+pushd . > /dev/null
+cd "${temp_path}"
+git clone --depth=1 https://github.com/raspberrypi/usbboot
+cd usbboot
+make
+sudo mkdir -p /usr/local/bin
+sudo cp rpiboot /usr/local/bin/rpiboot
+cd ..
+popd  > /dev/null
+cleanup
