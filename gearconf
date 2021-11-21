@@ -1,0 +1,19 @@
+#!/usr/bin/env bash
+
+SSH="$(which ssh) -q -o UserKnownHostsFile=/dev/null -o StrictHostKeyChecking=no raidnas.lan"
+
+function ls() {
+    $SSH "ls ~/gearconf"
+}
+
+function push() {
+    shift
+    cat $1 | $SSH "cat > ~/gearconf/$(basename $1)"
+}
+
+function pull() {
+    shift
+    $SSH "cat ~/gearconf/$1" > $1
+}
+
+[[ $(type -t $1) == function ]] && $1 $@

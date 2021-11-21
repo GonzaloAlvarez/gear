@@ -1,0 +1,28 @@
+#!/usr/bin/env bash
+
+export temp_path=$(mktemp -d)
+
+function cleanup {
+    rm -Rf "${temp_path}"
+}
+
+trap cleanup EXIT
+
+pushd . > /dev/null
+cd "${temp_path}"
+curl -LOJR https://github.com/ocaml/ocaml/archive/refs/tags/4.11.1.tar.gz
+tar -xzf ocaml-4.11.1.tar.gz
+cd ocaml-4.11.1
+./configure
+make world.opt
+sudo make install
+cd ..
+curl -LOJR https://github.com/bcpierce00/unison/archive/refs/tags/v2.51.3.tar.gz
+tar -xzf unison-2.51.3.tar.gz
+cd unison-2.51.3
+make UISTYLE=text
+sudo mkdir -p /usr/local/bin
+sudo cp src/unison /usr/local/bin/unison
+cd ..
+popd  > /dev/null
+cleanup
