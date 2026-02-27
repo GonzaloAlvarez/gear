@@ -3,11 +3,12 @@
 export temp_path=$(mktemp -d)
 export DEFF_VERSION="0.1.0"
 export RUST_WAS_INSTALLED=false
+export RUSTUP_HOME="$HOME/.rust/rustup"
+export CARGO_HOME="$HOME/.rust/cargo"
 
 function cleanup {
-    if [ "$RUST_WAS_INSTALLED" = false ] && command -v cargo &> /dev/null; then
-        sudo apt-get remove -y cargo rustc
-        sudo apt-get autoremove -y
+    if [ "$RUST_WAS_INSTALLED" = false ] && [ -d "$HOME/.rust" ]; then
+        rm -Rf "$HOME/.rust"
     fi
 
     rm -Rf "${temp_path}"
@@ -20,8 +21,8 @@ trap cleanup EXIT
 if command -v cargo &> /dev/null; then
     RUST_WAS_INSTALLED=true
 else
-    sudo apt-get update
-    sudo apt-get install -y cargo rustc
+    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --no-modify-path
+    export PATH="$CARGO_HOME/bin:$PATH"
 fi
 
 pushd . > /dev/null
