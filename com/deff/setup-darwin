@@ -1,0 +1,37 @@
+#!/usr/bin/env bash
+
+export temp_path=$(mktemp -d)
+export DEFF_VERSION="0.1.0"
+export RUST_WAS_INSTALLED=false
+
+function cleanup {
+    if [ "$RUST_WAS_INSTALLED" = false ] && command -v cargo &> /dev/null; then
+        brew uninstall rust
+    fi
+
+    rm -Rf "${temp_path}"
+    set +e
+}
+
+set -e
+trap cleanup EXIT
+
+if command -v cargo &> /dev/null; then
+    RUST_WAS_INSTALLED=true
+else
+    brew install rust
+fi
+
+pushd . > /dev/null
+cd "${temp_path}"
+curl -sL "https://github.com/flamestro/deff/archive/refs/tags/v${DEFF_VERSION}.tar.gz" -o deff.tar.gz
+tar -xzf deff.tar.gz
+cd "deff-${DEFF_VERSION}"
+
+cargo build --release --locked
+
+mkdir -p $HOME/bin
+cp target/release/deff $HOME/bin/deff
+
+popd > /dev/null
+cleanup

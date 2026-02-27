@@ -1,0 +1,37 @@
+#!/usr/bin/env bash
+
+export temp_path=$(mktemp -d)
+export DEFF_VERSION="0.1.0"
+export RUST_WAS_INSTALLED=false
+
+function cleanup {
+    rm -Rf "${temp_path}"
+    set +e
+}
+
+set -e
+trap cleanup EXIT
+
+if command -v cargo &> /dev/null; then
+    RUST_WAS_INSTALLED=true
+else
+    echo "Error: Rust/cargo not found."
+    echo "Please install Rust from https://rustup.rs/ by running:"
+    echo "  curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh"
+    echo "Then run this command again."
+    exit 1
+fi
+
+pushd . > /dev/null
+cd "${temp_path}"
+curl -sL "https://github.com/flamestro/deff/archive/refs/tags/v${DEFF_VERSION}.tar.gz" -o deff.tar.gz
+tar -xzf deff.tar.gz
+cd "deff-${DEFF_VERSION}"
+
+cargo build --release --locked
+
+mkdir -p $HOME/bin
+cp target/release/deff $HOME/bin/deff
+
+popd > /dev/null
+cleanup
