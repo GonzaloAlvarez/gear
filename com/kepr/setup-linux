@@ -1,0 +1,29 @@
+#!/usr/bin/env bash
+
+export temp_path=$(mktemp -d)
+
+function cleanup {
+    rm -Rf "${temp_path}"
+    set +e
+}
+
+set -e
+trap cleanup EXIT
+
+ARCH=$(uname -m)
+[ "$ARCH" = "x86_64" ] && ARCH="amd64"
+
+VERSION=$(curl -s https://api.github.com/repos/gonzaloalvarez/kepr/releases/latest | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/')
+DOWNLOAD_URL="https://github.com/GonzaloAlvarez/kepr/releases/download/${VERSION}/kepr-${VERSION}-linux-${ARCH}.tar.gz"
+
+pushd . > /dev/null
+cd "${temp_path}"
+curl -sL "${DOWNLOAD_URL}" -o kepr.tar.gz
+tar -xzf kepr.tar.gz
+BINARY_PATH=$(find . -name "kepr-linux-*" -type f | head -1)
+mkdir -p $HOME/bin
+cp "$BINARY_PATH" $HOME/bin/kepr
+chmod +x $HOME/bin/kepr
+popd > /dev/null
+
+cleanup
