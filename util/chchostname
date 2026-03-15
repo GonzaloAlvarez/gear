@@ -1,0 +1,28 @@
+#!/usr/bin/env bash
+set -e
+
+if [ $# -ne 1 ]; then
+    echo "Usage: chchostname <new-hostname>"
+    exit 1
+fi
+
+NEW_HOSTNAME="$1"
+OS="$(uname -s)"
+
+if [ "$OS" = "Darwin" ]; then
+    sudo scutil --set HostName "$NEW_HOSTNAME"
+    sudo scutil --set ComputerName "$NEW_HOSTNAME"
+    sudo scutil --set LocalHostName "$NEW_HOSTNAME"
+elif [ "$OS" = "Linux" ]; then
+    if command -v hostnamectl > /dev/null 2>&1; then
+        sudo hostnamectl set-hostname "$NEW_HOSTNAME"
+    else
+        sudo hostname "$NEW_HOSTNAME"
+        echo "$NEW_HOSTNAME" | sudo tee /etc/hostname > /dev/null
+    fi
+else
+    echo "Unsupported OS: $OS"
+    exit 1
+fi
+
+echo "Hostname changed to: $NEW_HOSTNAME"
