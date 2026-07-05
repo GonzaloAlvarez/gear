@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+
+if [ -f /usr/local/bin/kauket ]; then
+    sudo rm -f /usr/local/bin/kauket
+fi

@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+
+for d in /opt/homebrew/bin /usr/local/bin; do
+    if [ -f "$d/kauket" ]; then
+        if [ -w "$d" ]; then rm -f "$d/kauket"; else sudo rm -f "$d/kauket"; fi
+    fi
+done

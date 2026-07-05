@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+
+# Fallback for non-Debian Linux (the run dispatcher uses "linux" as the
+# default OS string when /etc/debian_version is absent, e.g. Arch).
+exec "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/install.sh"
