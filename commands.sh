@@ -10,3 +10,4 @@ for i in $__COMMANDS_PATH/util/*; do
 done
 
 alias gearconf="${__COMMANDS_PATH}/gearconf"
+alias gear="${__COMMANDS_PATH}/gear"

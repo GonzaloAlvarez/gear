@@ -1,0 +1,341 @@
+#!/usr/bin/env python3
+#
+# gear: manage the commands installed by this repo.
+#
+#   gear info                 show all available commands, install status,
+#                             versions, and whether an update is available
+#   gear update [names...]    update the named commands (or 'all' / no args
+#                             for everything installed, including gear itself)
+#   gear uninstall <names...> uninstall the named commands
+#
+# Version detection is best-effort and heuristic: each command in com/ pins
+# its version differently (in the setup script, via a GitHub "latest" query,
+# or through Homebrew), so where a version cannot be determined it is shown
+# as "unknown"/"?".
+#
+import argparse
+import json
+import os
+import re
+import shutil
+import subprocess
+import sys
+import urllib.request
+
+GEAR_PATH = os.path.dirname(os.path.realpath(__file__))
+COM_PATH = os.path.join(GEAR_PATH, "com")
+
+VERSION_RE = re.compile(r"\d+\.\d+(?:\.\d+)?")
+
+
+def osstr():
+    """Mirror the OS detection in run/cleanup."""
+    system = os.uname().sysname
+    if system == "Darwin":
+        return "darwin"
+    if system == "Linux" and os.path.exists("/etc/debian_version"):
+        return "debian"
+    return "linux"
+
+
+OSSTR = osstr()
+
+
+# --------------------------------------------------------------------------
+# helpers
+# --------------------------------------------------------------------------
+def run_capture(cmd, timeout=15):
+    """Run cmd, return (rc, stdout+stderr). Never raises."""
+    try:
+        p = subprocess.run(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            timeout=timeout,
+            text=True,
+        )
+        return p.returncode, p.stdout or ""
+    except Exception:
+        return 1, ""
+
+
+def run_stream(cmd):
+    """Run cmd inheriting stdio (for install/remove). Returns rc."""
+    try:
+        return subprocess.run(cmd).returncode
+    except Exception as e:
+        print(f"  error running {' '.join(cmd)}: {e}", file=sys.stderr)
+        return 1
+
+
+def strip_v(v):
+    return v[1:] if v and v.startswith("v") else v
+
+
+def extract_version(text):
+    m = VERSION_RE.search(text or "")
+    return m.group(0) if m else None
+
+
+# --------------------------------------------------------------------------
+# command model
+# --------------------------------------------------------------------------
+class Command:
+    def __init__(self, name):
+        self.name = name
+        self.dir = os.path.join(COM_PATH, name)
+        self.setup = os.path.join(self.dir, f"setup-{OSSTR}")
+        self.remove = os.path.join(self.dir, f"remove-{OSSTR}")
+
+    @property
+    def installed(self):
+        return shutil.which(self.name) is not None
+
+    def _script_text(self):
+        text = ""
+        for fname in (self.setup, os.path.join(self.dir, "install.sh")):
+            try:
+                with open(fname) as f:
+                    text += "\n" + f.read()
+            except OSError:
+                pass
+        return text
+
+    def installed_version(self):
+        if not self.installed:
+            return None
+        for flag in ("--version", "-v", "version"):
+            rc, out = run_capture([self.name, flag], timeout=8)
+            if rc == 0:
+                v = extract_version(out)
+                if v:
+                    return v
+        return None
+
+    def _github_repo(self, text):
+        # api.github.com/repos/OWNER/REPO
+        m = re.search(r"github\.com/repos/([\w.-]+/[\w.-]+)", text)
+        if m:
+            return m.group(1).removesuffix(".git")
+        # plain github.com/OWNER/REPO (not the api host, not the /repos/ path)
+        for m in re.finditer(r"(?<!api\.)github\.com/([\w.-]+/[\w.-]+)", text):
+            repo = m.group(1)
+            if not repo.startswith("repos/"):
+                return repo.removesuffix(".git")
+        return None
+
+    def _github_latest(self, repo):
+        url = f"https://api.github.com/repos/{repo}/releases/latest"
+        try:
+            req = urllib.request.Request(url, headers={"Accept": "application/vnd.github+json"})
+            with urllib.request.urlopen(req, timeout=10) as r:
+                data = json.load(r)
+            return data.get("tag_name")
+        except Exception:
+            return None
+
+    def available_version(self):
+        """Return (version_or_None, is_brew)."""
+        text = self._script_text()
+        # brew only if the command itself (not a build dependency) is brew-installed
+        if re.search(rf"brew install\b[^\n]*\b{re.escape(self.name)}\b", text):
+            return None, True
+        # explicit pinned VERSION=... variable
+        m = re.search(r"[A-Z_]*VERSION\s*=\s*\"?\$?\{?[A-Z_]*:?-?v?([0-9][0-9.]*)", text)
+        if m:
+            return m.group(1), False
+        # literal pinned tag/download URL, e.g. /tags/v2.51.3 or /download/v1.0.0
+        m = re.search(r"/(?:tags|download)/v?([0-9][0-9.]+)", text)
+        if m:
+            return m.group(1), False
+        # tracks GitHub latest
+        repo = self._github_repo(text)
+        if repo and "releases/latest" in text:
+            return self._github_latest(repo), False
+        if repo:
+            return self._github_latest(repo), False
+        return None, False
+
+    def status(self):
+        installed = self.installed
+        inst_v = self.installed_version() if installed else None
+        avail_v, is_brew = self.available_version()
+        update = "?"
+        if is_brew:
+            avail_label = "brew"
+            if installed:
+                rc, out = run_capture(["brew", "outdated", self.name], timeout=20)
+                update = "yes" if (rc == 0 and self.name in out) else "no"
+        else:
+            avail_label = avail_v or "unknown"
+            if installed and inst_v and avail_v:
+                update = "no" if strip_v(inst_v) == strip_v(avail_v) else "yes"
+        return {
+            "name": self.name,
+            "status": "installed" if installed else "not installed",
+            "installed": inst_v or ("-" if not installed else "unknown"),
+            "available": avail_label,
+            "update": update,
+        }
+
+
+class GearSelf:
+    name = "gear"
+
+    @property
+    def installed(self):
+        return True
+
+    def status(self):
+        rc, out = run_capture(["git", "-C", GEAR_PATH, "describe", "--tags", "--always"])
+        version = out.strip() if rc == 0 and out.strip() else "unknown"
+        update = "?"
+        # best-effort: is the local branch behind its upstream?
+        if run_capture(["git", "-C", GEAR_PATH, "fetch", "--quiet"], timeout=20)[0] == 0:
+            rc, out = run_capture(["git", "-C", GEAR_PATH, "rev-list", "--count", "HEAD..@{u}"])
+            if rc == 0 and out.strip().isdigit():
+                update = "yes" if int(out.strip()) > 0 else "no"
+        return {
+            "name": "gear",
+            "status": "installed",
+            "installed": version,
+            "available": "git",
+            "update": update,
+        }
+
+
+# --------------------------------------------------------------------------
+# discovery
+# --------------------------------------------------------------------------
+def discover():
+    names = []
+    if os.path.isdir(COM_PATH):
+        names = sorted(
+            d for d in os.listdir(COM_PATH) if os.path.isdir(os.path.join(COM_PATH, d))
+        )
+    return [Command(n) for n in names]
+
+
+# --------------------------------------------------------------------------
+# subcommands
+# --------------------------------------------------------------------------
+def cmd_info(_args):
+    rows = [c.status() for c in discover()]
+    rows.append(GearSelf().status())
+
+    headers = ("COMMAND", "STATUS", "INSTALLED", "AVAILABLE", "UPDATE")
+    keys = ("name", "status", "installed", "available", "update")
+    widths = [len(h) for h in headers]
+    for r in rows:
+        for i, k in enumerate(keys):
+            widths[i] = max(widths[i], len(str(r[k])))
+
+    def fmt(vals):
+        return "  ".join(str(v).ljust(widths[i]) for i, v in enumerate(vals))
+
+    print(fmt(headers))
+    for r in rows:
+        print(fmt([r[k] for k in keys]))
+    return 0
+
+
+def _update_one(cmd):
+    if not os.path.isdir(cmd.dir):
+        print(f"[{cmd.name}] unknown command")
+        return 1
+    if not cmd.installed:
+        print(f"[{cmd.name}] not installed, skipping")
+        return 0
+    rc = 0
+    if os.access(cmd.remove, os.X_OK):
+        print(f"[{cmd.name}] removing")
+        rc = run_stream([cmd.remove])
+    else:
+        print(f"[{cmd.name}] no remove-{OSSTR} script, skipping removal")
+    if os.access(cmd.setup, os.X_OK):
+        print(f"[{cmd.name}] installing")
+        rc = run_stream([cmd.setup])
+    else:
+        print(f"[{cmd.name}] cannot install: no setup-{OSSTR} script")
+        return 1
+    return rc
+
+
+def _update_gear():
+    print("[gear] git pull")
+    return run_stream(["git", "-C", GEAR_PATH, "pull"])
+
+
+def cmd_update(args):
+    names = args.names
+    all_commands = discover()
+    if not names or names == ["all"]:
+        targets = [c for c in all_commands if c.installed]
+        gear_included = True
+    else:
+        known = {c.name: c for c in all_commands}
+        targets = []
+        gear_included = False
+        for n in names:
+            if n == "gear":
+                gear_included = True
+            elif n in known:
+                targets.append(known[n])
+            else:
+                print(f"[{n}] unknown command")
+    rc = 0
+    for c in targets:
+        rc |= _update_one(c)
+    if gear_included:
+        rc |= _update_gear()
+    return rc
+
+
+def cmd_uninstall(args):
+    known = {c.name: c for c in discover()}
+    rc = 0
+    for n in args.names:
+        if n not in known:
+            print(f"[{n}] unknown command")
+            rc = 1
+            continue
+        c = known[n]
+        if not c.installed:
+            print(f"[{n}] not installed")
+            continue
+        if not os.access(c.remove, os.X_OK):
+            print(f"[{n}] no remove-{OSSTR} script")
+            rc = 1
+            continue
+        print(f"[{n}] uninstalling")
+        rc |= run_stream([c.remove])
+    return rc
+
+
+# --------------------------------------------------------------------------
+def main():
+    parser = argparse.ArgumentParser(prog="gear", description="Manage gear commands.")
+    sub = parser.add_subparsers(dest="cmd")
+
+    sub.add_parser("info", help="show available commands, versions and updates")
+
+    p_update = sub.add_parser("update", help="update commands (default: all installed)")
+    p_update.add_argument("names", nargs="*", help="command names, or 'all'")
+
+    p_uninstall = sub.add_parser("uninstall", help="uninstall commands")
+    p_uninstall.add_argument("names", nargs="+", help="command names")
+
+    args = parser.parse_args()
+
+    if args.cmd in (None, "info"):
+        return cmd_info(args)
+    if args.cmd == "update":
+        return cmd_update(args)
+    if args.cmd == "uninstall":
+        return cmd_uninstall(args)
+    parser.print_help()
+    return 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())
