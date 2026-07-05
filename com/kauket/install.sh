@@ -11,7 +11,7 @@
 #
 set -euo pipefail
 
-KAUKET_VERSION="${KAUKET_VERSION:-1.0.0}"
+KAUKET_VERSION="${KAUKET_VERSION:-1.0.1}"
 KAUKET_REPO_SLUG="${KAUKET_REPO_SLUG:-GonzaloAlvarez/kauket}"
 
 fail() { echo "kauket: $*" >&2; exit 1; }
