@@ -1,8 +1,11 @@
 #!/usr/bin/env bash
 #
-# Download, checksum-verify, and install the pinned kauket release binary.
-# Shared by setup-darwin / setup-debian / setup-linux. This is the single
-# source of truth for the pinned kauket version.
+# Download, checksum-verify, and install the latest kauket release binary.
+# Shared by setup-darwin / setup-debian / setup-linux.
+#
+# By default this tracks the latest GitHub release. To pin a specific
+# version instead, set the KAUKET_VERSION environment variable to the
+# desired release number (without the leading "v").
 #
 # Mirrors the release-artifact layout published by kauket's goreleaser:
 #   https://github.com/GonzaloAlvarez/kauket/releases/download/vX.Y.Z/
@@ -11,10 +14,21 @@
 #
 set -euo pipefail
 
-KAUKET_VERSION="${KAUKET_VERSION:-1.0.1}"
 KAUKET_REPO_SLUG="${KAUKET_REPO_SLUG:-GonzaloAlvarez/kauket}"
 
 fail() { echo "kauket: $*" >&2; exit 1; }
+
+# Resolve the latest release tag from the GitHub API (strips the leading "v").
+resolve_latest() {
+    curl -fsSL -H "Accept: application/vnd.github+json" \
+        "https://api.github.com/repos/${KAUKET_REPO_SLUG}/releases/latest" \
+        | grep -m1 '"tag_name"' \
+        | sed -E 's/.*"tag_name"[[:space:]]*:[[:space:]]*"v?([^"]+)".*/\1/'
+}
+
+# Honor an explicit pin, otherwise track the latest release.
+KAUKET_VERSION="${KAUKET_VERSION:-$(resolve_latest)}"
+[ -n "$KAUKET_VERSION" ] || fail "could not determine latest kauket version"
 
 case "$(uname -s)" in
     Linux)  os="linux" ;;
