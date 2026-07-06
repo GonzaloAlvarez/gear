@@ -83,8 +83,9 @@ chmod 0755 kauket
 $SUDO mkdir -p "$install_dir"
 $SUDO install -m 0755 kauket "$target"
 
-# kauket keeps its identities/config here; ensure it exists at 0700.
-mkdir -p "$HOME/.config/kauket"
-chmod 0700 "$HOME/.config/kauket"
+# Don't pre-create the config home: kauket's EnsureHome() makes it 0700 at the
+# OS-default location on first use (macOS: ~/Library/Application Support/kauket;
+# Linux: ~/.config/kauket), or wherever KAUKET_HOME points. Hardcoding
+# ~/.config/kauket here created a non-default stray dir on macOS.
 
 echo "kauket installed: $("$target" version 2>/dev/null || echo "$target")"
