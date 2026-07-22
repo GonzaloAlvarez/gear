@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+
+set -e
+mkdir -p "$HOME/bin"
+curl -fsSL https://raw.githubusercontent.com/GonzaloAlvarez/cn-cli-devbox/main/clouddevbox \
+    -o "$HOME/bin/clouddevbox"
+chmod +x "$HOME/bin/clouddevbox"
+
+if ! command -v session-manager-plugin >/dev/null 2>&1; then
+    echo "note: session-manager-plugin not on PATH - 'clouddevbox ssm' needs it:"
+    echo "  ~/.gear/com/session-manager-plugin/setup-debian"
+fi
