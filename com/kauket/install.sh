@@ -19,11 +19,18 @@ KAUKET_REPO_SLUG="${KAUKET_REPO_SLUG:-GonzaloAlvarez/kauket}"
 fail() { echo "kauket: $*" >&2; exit 1; }
 
 # Resolve the latest release tag from the GitHub API (strips the leading "v").
+# Deliberately pipe-free: under `set -o pipefail`, `curl | grep -m1` dies with
+# curl exit 23 (SIGPIPE) once the release JSON outgrows the pipe buffer —
+# grep closes the pipe after the first match while curl is still writing.
+# Bit us on kauket v2.0.0 (5 assets + changelog pushed the body past the
+# threshold); a bash regex on the captured body has no pipe to break.
 resolve_latest() {
-    curl -fsSL -H "Accept: application/vnd.github+json" \
-        "https://api.github.com/repos/${KAUKET_REPO_SLUG}/releases/latest" \
-        | grep -m1 '"tag_name"' \
-        | sed -E 's/.*"tag_name"[[:space:]]*:[[:space:]]*"v?([^"]+)".*/\1/'
+    local json
+    json="$(curl -fsSL -H "Accept: application/vnd.github+json" \
+        "https://api.github.com/repos/${KAUKET_REPO_SLUG}/releases/latest")" || return 1
+    if [[ "$json" =~ \"tag_name\"[[:space:]]*:[[:space:]]*\"v?([^\"]+)\" ]]; then
+        printf '%s\n' "${BASH_REMATCH[1]}"
+    fi
 }
 
 # Honor an explicit pin, otherwise track the latest release.
