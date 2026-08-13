@@ -49,11 +49,10 @@ case "$(uname -m)" in
     *)              fail "unsupported arch: $(uname -m)" ;;
 esac
 
-if [ "$os" = "darwin" ] && [ "$arch" = "arm64" ]; then
-    install_dir="/opt/homebrew/bin"
-else
-    install_dir="/usr/local/bin"
-fi
+# Install per-user into ~/bin (override with KAUKET_INSTALL_DIR). This keeps
+# kauket out of brew-owned prefixes and avoids needing sudo.
+install_dir="${KAUKET_INSTALL_DIR:-$HOME/bin}"
+mkdir -p "$install_dir" 2>/dev/null || true
 target="$install_dir/kauket"
 
 tarball="kauket_${KAUKET_VERSION}_${os}_${arch}.tar.gz"
