@@ -37,11 +37,17 @@ resolve_latest() {
 KAUKET_VERSION="${KAUKET_VERSION:-$(resolve_latest)}"
 [ -n "$KAUKET_VERSION" ] || fail "could not determine latest kauket version"
 
-case "$(uname -s)" in
-    Linux)  os="linux" ;;
-    Darwin) os="darwin" ;;
-    *)      fail "unsupported OS: $(uname -s)" ;;
-esac
+# Termux executes binaries through the Android system linker, which rejects
+# the non-PIE linux artifacts; kauket >= 2.2.1 publishes a PIE android build.
+if [ -n "${TERMUX_VERSION:-}" ]; then
+    os="android"
+else
+    case "$(uname -s)" in
+        Linux)  os="linux" ;;
+        Darwin) os="darwin" ;;
+        *)      fail "unsupported OS: $(uname -s)" ;;
+    esac
+fi
 
 case "$(uname -m)" in
     x86_64|amd64)   arch="amd64" ;;

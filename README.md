@@ -24,9 +24,12 @@ A command supports Termux only when it ships an explicit `setup-termux`.
 
 Commands with `setup-termux`/`remove-termux`: `kauket`, `clouddevbox`.
 
-- `kauket`: the static linux_arm64 Go binary runs on bionic, but pure-Go DNS
-  resolution can fail on a real Android device (no `/etc/resolv.conf`; Docker
-  containers inject one, so container tests don't prove it). If kauket cannot
-  resolve GitHub on-device, that needs a kauket-side resolver fallback.
+- `kauket`: installs the PIE `android_arm64` artifact (kauket >= 2.2.1). The
+  linux artifact is non-PIE and the Play-build Termux runs binaries through
+  the Android system linker, which rejects it with `unexpected e_type: 2`;
+  kauket 2.2.1 also ships an argv shim for system_linker_exec and a DNS
+  fallback resolver (no `/etc/resolv.conf` on Android; override with
+  `KAUKET_DNS`). Note Docker containers mask both issues — only a real
+  device proves them.
 - `clouddevbox`: everything except `ssm` (no aws CLI / session-manager-plugin
   builds for bionic). Use `clouddevbox ssh` over the Tailscale app's VPN.
