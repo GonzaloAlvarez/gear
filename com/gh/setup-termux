@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+
+# gh is in the Termux main repo, built PIE for bionic — no sudo, no apt repo
+# wrangling needed.
+set -e
+pkg install -y gh

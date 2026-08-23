@@ -22,7 +22,8 @@ A command supports Termux only when it ships an explicit `setup-termux`.
 
 ## Termux support
 
-Commands with `setup-termux`/`remove-termux`: `kauket`, `clouddevbox`.
+Commands with `setup-termux`/`remove-termux`: `kauket`, `clouddevbox`, `gh`
+(installed from the Termux `pkg` repo).
 
 - `kauket`: installs the PIE `android_arm64` artifact (kauket >= 2.2.1). The
   linux artifact is non-PIE and the Play-build Termux runs binaries through
