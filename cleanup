@@ -4,7 +4,9 @@ __GEAR_PATH="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 __GEAR_COM_PATH="$__GEAR_PATH/com"
 __OS="$(uname -s)"
 __OSSTR="linux"
-if [ "$__OS" == "Darwin" ]; then
+if [ -n "${TERMUX_VERSION:-}" ]; then
+    __OSSTR="termux"
+elif [ "$__OS" == "Darwin" ]; then
     __OSSTR="darwin"
 elif [ "$__OS" == "Linux" ]; then
     if [ -f "/etc/debian_version" ]; then
@@ -14,7 +16,7 @@ fi
 
 for i in ${__GEAR_COM_PATH}/*; do
     __command="$(basename $i)"
-    __command_path="$(which $__command)"
+    __command_path="$(command -v "$__command")"
     if [ "${__command_path}" ]; then
         __remove_script="${__GEAR_COM_PATH}/${__command}/remove-${__OSSTR}"
 

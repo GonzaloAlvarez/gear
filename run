@@ -3,7 +3,8 @@
 __GEAR_PATH="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 __GEAR_COM_PATH="$__GEAR_PATH/com"
 __COMMAND="$1"
-__COMMAND_PATH="$(which $__COMMAND)"
+# command -v, not which: Termux's base install has no which binary.
+__COMMAND_PATH="$(command -v "$__COMMAND")"
 
 function _fail {
     echo "$@"
@@ -13,7 +14,12 @@ function _fail {
 if [ -z "$__COMMAND_PATH" ]; then
     __OS="$(uname -s)"
     __OSSTR="linux"
-    if [ "$__OS" == "Darwin" ]; then
+    # TERMUX_VERSION is the repo-wide Termux signal (never $PREFIX checks).
+    # Termux gets its own osstr with no linux fallback: bionic + no sudo make
+    # a silent fallback a trap.
+    if [ -n "${TERMUX_VERSION:-}" ]; then
+        __OSSTR="termux"
+    elif [ "$__OS" == "Darwin" ]; then
         __OSSTR="darwin"
     elif [ "$__OS" == "Linux" ]; then
         if [ -f "/etc/debian_version" ]; then
@@ -33,7 +39,7 @@ if [ -z "$__COMMAND_PATH" ]; then
         if [ $? -ne 0 ]; then
             _fail "Could not install [$__COMMAND]"
         fi
-        __COMMAND_PATH="$(which $__COMMAND)"
+        __COMMAND_PATH="$(command -v "$__COMMAND")"
         if [ -z "$__COMMAND_PATH" ]; then
             _fail "Command [$__COMMAND] installation was not sucessful"
         fi

@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+
+# install.sh resolves linux_arm64 (uname -s/-m) and installs to ~/bin, which
+# is user-writable on Termux, so its sudo branch never fires. Note: the
+# static Go binary runs on bionic, but pure-Go DNS resolution can fail on a
+# real Android device (no /etc/resolv.conf) — see README.
+exec "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/install.sh"

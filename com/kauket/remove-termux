@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+
+# Termux installs only ever land in ~/bin (no sudo, no /usr/local).
+rm -f "$HOME/bin/kauket"

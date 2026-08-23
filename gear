@@ -30,6 +30,8 @@ VERSION_RE = re.compile(r"\d+\.\d+(?:\.\d+)?")
 
 def osstr():
     """Mirror the OS detection in run/cleanup."""
+    if os.environ.get("TERMUX_VERSION"):
+        return "termux"
     system = os.uname().sysname
     if system == "Darwin":
         return "darwin"

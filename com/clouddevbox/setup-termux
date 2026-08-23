@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+
+set -e
+mkdir -p "$HOME/bin"
+curl -fsSL https://raw.githubusercontent.com/GonzaloAlvarez/cn-cli-devbox/main/clouddevbox \
+    -o "$HOME/bin/clouddevbox"
+chmod +x "$HOME/bin/clouddevbox"
+
+echo "note: 'clouddevbox ssm' is unsupported on Termux (no aws CLI /"
+echo "session-manager-plugin on bionic); use 'clouddevbox ssh' over the"
+echo "Tailscale app's VPN."
