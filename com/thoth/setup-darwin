@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+
+set -e
+mkdir -p "$HOME/bin"
+curl -fsSL https://raw.githubusercontent.com/GonzaloAlvarez/thoth/main/thoth \
+    -o "$HOME/bin/thoth"
+chmod +x "$HOME/bin/thoth"
+
+if ! command -v gh >/dev/null 2>&1; then
+    echo "note: gh not on PATH - thoth needs it:"
+    echo "  ~/.gear/com/gh/setup-darwin"
+fi
