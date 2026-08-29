@@ -1,0 +1,133 @@
+#!/usr/bin/env bash
+# ts — personal tailnet client for headscale (hs.gn.al).
+#
+#   ts up        connect: tailscale up against https://hs.gn.al with
+#                --accept-routes and --accept-dns so lab.gn.al / ts.gn.al
+#                names resolve. First registration: mint a preauth key on
+#                the VPS and run  TS_AUTHKEY=<key> ts up  — without a key
+#                the headscale auth URL is printed instead.
+#   ts status    connected/disconnected; full `tailscale status` when up.
+#                Exit 0 when connected, 1 otherwise. Default command.
+#   ts down      disconnect from the tailnet.
+#   ts --version print version.
+#
+# macOS: a minimal gray menu-bar dot (~/bin/ts-indicator) shows while
+# connected. It polls tailscaled every 5s and exits the moment the backend
+# is not Running — the dot cannot lie about VPN state.
+#
+# Needs tailscale/tailscaled: bash <(curl -fsSL https://go.gn.al/amun) tailscale
+set -euo pipefail
+
+VERSION="1.0.0"   # keep in sync with TS_VERSION in com/ts/install.sh
+LOGIN_SERVER="${TS_LOGIN_SERVER:-https://hs.gn.al}"
+OS="$(uname -s)"
+SUDO="sudo"; [ "$(id -u)" = "0" ] && SUDO=""
+
+fail() { echo "ts: $*" >&2; exit 1; }
+usage() { sed -n '2,19p' "$0"; }
+
+have_tailscale() {
+    command -v tailscale >/dev/null 2>&1 \
+        || fail "tailscale not installed — run: bash <(curl -fsSL https://go.gn.al/amun) tailscale"
+}
+
+# Prints BackendState (Running/Stopped/NeedsLogin/...); empty when the daemon
+# is not reachable.
+backend_state() {
+    tailscale status --peers=false --json 2>/dev/null \
+        | grep -o '"BackendState":[[:space:]]*"[^"]*"' | head -1 | cut -d'"' -f4 || true
+}
+
+ensure_daemon() {
+    [ -n "$(backend_state)" ] && return 0
+    echo "ts: tailscaled not running — attempting to start it" >&2
+    if [ "$OS" = "Darwin" ]; then
+        $SUDO launchctl bootstrap system /Library/LaunchDaemons/com.tailscale.tailscaled.plist 2>/dev/null \
+            || $SUDO launchctl kickstart system/com.tailscale.tailscaled 2>/dev/null || true
+    else
+        $SUDO systemctl start tailscaled 2>/dev/null || true
+    fi
+    sleep 2
+    [ -n "$(backend_state)" ] \
+        || fail "tailscaled still not running — repair with: bash <(curl -fsSL https://go.gn.al/amun) tailscale"
+}
+
+indicator_compile() {
+    local src="$HOME/.gear/com/ts/ts-indicator.swift"
+    command -v swiftc >/dev/null 2>&1 || return 1
+    [ -f "$src" ] || return 1
+    mkdir -p "$HOME/bin"
+    swiftc -O -o "$HOME/bin/ts-indicator" "$src" 2>/dev/null || return 1
+}
+indicator_start() {
+    [ "$OS" = "Darwin" ] || return 0
+    pgrep -x ts-indicator >/dev/null 2>&1 && return 0
+    if [ ! -x "$HOME/bin/ts-indicator" ]; then
+        indicator_compile || { echo "ts: no menu-bar indicator (swiftc unavailable or build failed)" >&2; return 0; }
+    fi
+    nohup "$HOME/bin/ts-indicator" >/dev/null 2>&1 &
+    disown 2>/dev/null || true
+}
+indicator_stop() {
+    [ "$OS" = "Darwin" ] || return 0
+    pkill -x ts-indicator 2>/dev/null || true
+}
+
+cmd_up() {
+    have_tailscale
+    ensure_daemon
+    # --reset: prefs become exactly this flag set, so repeat runs are
+    # idempotent and never hit tailscale's "flags changed" refusal.
+    local flags=(
+        --reset
+        --login-server="$LOGIN_SERVER"
+        --accept-routes
+        --accept-dns=true
+        --hostname="$(hostname -s | tr '[:upper:]' '[:lower:]')"
+    )
+    [ -n "${TS_AUTHKEY:-}" ] && flags+=(--authkey="$TS_AUTHKEY")
+    # Unregistered and no authkey: tailscale prints the headscale auth URL
+    # and waits; that passes straight through to the terminal.
+    $SUDO tailscale up "${flags[@]}"
+    local state=""
+    for _ in 1 2 3 4 5; do
+        state="$(backend_state)"
+        [ "$state" = "Running" ] && break
+        sleep 1
+    done
+    [ "$state" = "Running" ] || fail "backend is '${state:-unreachable}' after up"
+    echo "ts: connected ($(tailscale ip -4 2>/dev/null | head -1))"
+    indicator_start
+}
+
+cmd_down() {
+    have_tailscale
+    $SUDO tailscale down 2>/dev/null || true
+    indicator_stop
+    echo "ts: disconnected"
+}
+
+cmd_status() {
+    have_tailscale
+    local state; state="$(backend_state)"
+    case "$state" in
+        Running)
+            echo "ts: connected"
+            echo
+            tailscale status
+            indicator_start   # reconcile: the dot must exist while connected
+            ;;
+        "")         echo "ts: disconnected (tailscaled not running)"; exit 1 ;;
+        NeedsLogin) echo "ts: disconnected (needs login — run: ts up)"; exit 1 ;;
+        *)          echo "ts: disconnected ($state)"; exit 1 ;;
+    esac
+}
+
+case "${1:-status}" in
+    up)     cmd_up ;;
+    down)   cmd_down ;;
+    status) cmd_status ;;
+    --version|-v|version) echo "$VERSION" ;;
+    -h|--help|help) usage ;;
+    *) echo "ts: unknown command: $1" >&2; usage >&2; exit 2 ;;
+esac

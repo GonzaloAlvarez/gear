@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+
+pkill -x ts-indicator 2>/dev/null || true
+rm -f "$HOME/bin/ts" "$HOME/bin/ts-indicator"
