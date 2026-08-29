@@ -32,7 +32,7 @@ app.setActivationPolicy(.accessory)         // menu-bar only; no Dock icon
 let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
 item.button?.attributedTitle = NSAttributedString(
     string: "\u{25CF}",                     // ●
-    attributes: [.foregroundColor: NSColor.secondaryLabelColor])
+    attributes: [.foregroundColor: NSColor.labelColor])
 
 Timer.scheduledTimer(withTimeInterval: 5, repeats: true) { _ in
     if !backendIsRunning() { app.terminate(nil) }

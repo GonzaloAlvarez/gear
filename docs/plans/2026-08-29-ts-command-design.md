@@ -46,7 +46,7 @@ wrappers; fixdocker precedent for shipping our own payload):
 - **Indicator honesty.** The dot process polls the backend every 5s and exits the moment
   BackendState != Running, and refuses to start unless Running. It can therefore never
   show "connected" when the VPN is down — the property the GUI app lacked. No menu, no
-  clicks: NSStatusItem with a "●" in `secondaryLabelColor` (adapts light/dark),
+  clicks: NSStatusItem with a "●" in `labelColor` (full-contrast, adapts light/dark),
   `.accessory` activation policy (no Dock icon).
 - **pgrep/pkill `-x ts-indicator`, no PID file.** Self-healing across crashes/reboots;
   process name is unique. `ts down` pkills immediately; the 5s self-poll is the backstop
