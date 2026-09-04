@@ -6,7 +6,7 @@
 #
 set -euo pipefail
 
-KORA_VERSION="0.2.5"   # keep in sync with VERSION= in the kora repo (`gear info` greps this)
+KORA_VERSION="0.2.6"   # keep in sync with VERSION= in the kora repo (`gear info` greps this)
 
 # A foreign `kora` already on PATH would win gear's `command -v` dispatch
 # forever and this install would be dead code - refuse loudly instead.
