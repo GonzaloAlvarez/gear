@@ -33,6 +33,13 @@ else
         echo "note: qemu not on PATH - local VMs need it: sudo apt-get install qemu-system-x86 genisoimage (or the amun 'qemu' plugin)"
 fi
 if ! command -v clouddevbox >/dev/null 2>&1; then
+    # gear's osstr taxonomy (see ~/.gear/run); clouddevbox now has a setup
+    # script for each of these, so no linux->debian remapping is needed.
+    if [ -n "${TERMUX_VERSION:-}" ]; then __osstr=termux
+    elif [ "$(uname -s)" = "Darwin" ]; then __osstr=darwin
+    elif [ -f /etc/debian_version ]; then __osstr=debian
+    else __osstr=linux
+    fi
     echo "note: clouddevbox not on PATH - 'kora new --cloud' needs it:"
-    echo "  ~/.gear/com/clouddevbox/setup-$(uname -s | tr '[:upper:]' '[:lower:]' | sed 's/darwin/darwin/;s/linux/debian/')"
+    echo "  ~/.gear/com/clouddevbox/setup-$__osstr"
 fi
