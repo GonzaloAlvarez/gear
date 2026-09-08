@@ -6,7 +6,7 @@
 #
 set -euo pipefail
 
-KORA_VERSION="0.2.6"   # keep in sync with VERSION= in the kora repo (`gear info` greps this)
+KORA_VERSION="0.2.7"   # keep in sync with VERSION= in the kora repo (`gear info` greps this)
 
 # A foreign `kora` already on PATH would win gear's `command -v` dispatch
 # forever and this install would be dead code - refuse loudly instead.
@@ -29,8 +29,11 @@ if [ "$(uname -s)" = "Darwin" ]; then
     command -v qemu-system-aarch64 >/dev/null 2>&1 || \
         echo "note: qemu not on PATH - arch VMs need it: brew install qemu"
 else
+    # Local VMs need qemu + qemu-img + an ISO tool + OVMF firmware; on Arch the
+    # display devices are split out too (virtio-vga). The amun 'qemu' plugin
+    # installs the right set per distro, so point at it rather than guessing.
     command -v qemu-system-x86_64 >/dev/null 2>&1 || \
-        echo "note: qemu not on PATH - local VMs need it: sudo apt-get install qemu-system-x86 genisoimage (or the amun 'qemu' plugin)"
+        echo "note: qemu not on PATH - local VMs need it: amun qemu"
 fi
 if ! command -v clouddevbox >/dev/null 2>&1; then
     # gear's osstr taxonomy (see ~/.gear/run); clouddevbox now has a setup
