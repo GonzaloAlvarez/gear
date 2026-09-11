@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+# node stays (brew-managed, shared); ~/.qwen config is seshat-owned
+# (bundle llm.qwen.local) and stays too.
+command -v npm >/dev/null 2>&1 && npm uninstall -g @qwen-code/qwen-code 2>/dev/null || true

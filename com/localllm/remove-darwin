@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+# Conservative removal: only the wrapper. brew llama.cpp, downloaded models
+# (~/.local/share/localllm) and the seshat-owned config
+# (~/.config/localllm/config) are intentionally kept — `gear update` is
+# remove+setup, and removing them here would churn brew and orphan seshat
+# state on every update. Full cleanup by hand:
+#   brew uninstall llama.cpp
+#   rm -rf ~/.local/share/localllm ~/.local/state/localllm
+#   seshat remove llm.qwen.local
+rm -f "$HOME/bin/localllm"

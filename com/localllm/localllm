@@ -1,0 +1,177 @@
+#!/usr/bin/env bash
+# localllm — on-demand local LLM server (llama.cpp) with model management.
+#
+#   localllm serve      start llama-server FOREGROUND on HOST:PORT
+#                       (auto-pulls the model on first run; persistent
+#                       server: tmux new -s llm 'localllm serve')
+#   localllm pull       download the configured model only (resumable,
+#                       sha256-verified when MODEL_SHA256 is set)
+#   localllm status     pidfile + HTTP probe of /v1/models; exit 0 = healthy
+#   localllm stop       stop the pidfile-tracked server
+#   localllm config     print the effective configuration
+#   localllm --version  print version
+#
+# Configuration precedence: built-in defaults < ~/.config/localllm/config
+# (seshat-owned, dotfiles bundle llm.qwen.local) < environment. Ad-hoc
+# override example:  KV_QUANT=f16 localllm serve
+# LOCALLLM_CONFIG / LOCALLLM_DATA_DIR / LLAMA_SERVER relocate the config
+# file, model dir, and server binary (tests rely on these).
+set -euo pipefail
+
+VERSION="1.0.0"   # keep in sync with LOCALLLM_VERSION in com/localllm/install.sh
+
+fail() { echo "localllm: $*" >&2; exit 1; }
+usage() { sed -n '2,18p' "$0"; }
+
+CONFIG_KEYS=(MODEL_HF_REPO MODEL_FILE MODEL_SHA256 MODEL_ALIAS HOST PORT
+             CTX NGL NP FLASH_ATTN KV_QUANT EXTRA_ARGS)
+
+# Remember values the environment provided — they must win over the config
+# file, so a plain `KV_QUANT=f16 localllm serve` works without editing state.
+for k in "${CONFIG_KEYS[@]}"; do
+    if [ "${!k+set}" = "set" ]; then printf -v "__env_$k" '%s' "${!k}"; fi
+done
+
+# Built-in defaults (the klaus-proven stack); the seshat-rendered config
+# normally overrides all of these.
+MODEL_HF_REPO="unsloth/Qwen3.8-27B-GGUF"
+MODEL_FILE="Qwen3.8-27B-UD-Q6_K.gguf"
+MODEL_SHA256="c9c206812fbe4ac7b76a729e25928b63f2ae89d37f69da7a71c20aec763cd436"
+MODEL_ALIAS="qwen3.8-27b-local"
+HOST="127.0.0.1"
+PORT="8080"
+CTX="65536"
+NGL="all"
+NP="1"
+FLASH_ATTN="on"
+KV_QUANT="q8_0"
+EXTRA_ARGS=""
+
+CONFIG_FILE="${LOCALLLM_CONFIG:-$HOME/.config/localllm/config}"
+if [ -f "$CONFIG_FILE" ]; then
+    # shellcheck source=/dev/null
+    . "$CONFIG_FILE"
+fi
+
+for k in "${CONFIG_KEYS[@]}"; do
+    ek="__env_$k"
+    if [ "${!ek+set}" = "set" ]; then printf -v "$k" '%s' "${!ek}"; fi
+done
+
+DATA_DIR="${LOCALLLM_DATA_DIR:-$HOME/.local/share/localllm}"
+MODELS_DIR="$DATA_DIR/models"
+STATE_DIR="$HOME/.local/state/localllm"
+PIDFILE="$STATE_DIR/llama-server.pid"
+MODEL_PATH="$MODELS_DIR/$MODEL_FILE"
+
+server_bin() { echo "${LLAMA_SERVER:-$(command -v llama-server || true)}"; }
+
+# Alive AND actually llama-server — a recycled pid must never be killable.
+pid_alive() {
+    local pid="$1"
+    [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null \
+        && ps -p "$pid" -o comm= 2>/dev/null | grep -q "llama-server"
+}
+
+cmd_pull() {
+    if [ -f "$MODEL_PATH" ]; then
+        echo "localllm: model present: $MODEL_PATH"
+        return 0
+    fi
+    mkdir -p "$MODELS_DIR"
+    local url="https://huggingface.co/$MODEL_HF_REPO/resolve/main/$MODEL_FILE"
+    local partial="$MODEL_PATH.partial"
+    echo "localllm: pulling $MODEL_FILE from $MODEL_HF_REPO (resumable)"
+    # Stable .partial path (not mktemp) is what makes -C - resume work.
+    curl -fL -C - --retry 3 "$url" -o "$partial"
+    if [ -n "$MODEL_SHA256" ]; then
+        echo "localllm: verifying sha256"
+        echo "$MODEL_SHA256  $partial" | shasum -a 256 -c - >/dev/null \
+            || fail "sha256 mismatch for $partial — delete it and re-pull"
+    fi
+    mv "$partial" "$MODEL_PATH"
+    echo "localllm: model ready: $MODEL_PATH"
+}
+
+cmd_serve() {
+    local bin; bin="$(server_bin)"
+    [ -n "$bin" ] || fail "llama-server not found — reinstall with: gear update"
+    if [ -f "$PIDFILE" ] && pid_alive "$(cat "$PIDFILE")"; then
+        fail "already serving (pid $(cat "$PIDFILE")) — run 'localllm stop' first"
+    fi
+    rm -f "$PIDFILE"
+    if curl -fsS -m 2 "http://$HOST:$PORT/v1/models" >/dev/null 2>&1; then
+        fail "something else is already listening on $HOST:$PORT"
+    fi
+    [ -f "$MODEL_PATH" ] || cmd_pull
+    mkdir -p "$STATE_DIR"
+    echo $$ > "$PIDFILE"
+    echo "localllm: serving $MODEL_ALIAS on http://$HOST:$PORT (ctx $CTX, kv $KV_QUANT)"
+    # exec keeps our pid, so the pidfile IS llama-server's pid.
+    # shellcheck disable=SC2086  # EXTRA_ARGS is deliberately word-split
+    exec "$bin" -m "$MODEL_PATH" -a "$MODEL_ALIAS" \
+        -ngl "$NGL" -c "$CTX" -np "$NP" -fa "$FLASH_ATTN" \
+        -ctk "$KV_QUANT" -ctv "$KV_QUANT" \
+        --jinja --no-mmproj --host "$HOST" --port "$PORT" $EXTRA_ARGS
+}
+
+cmd_status() {
+    local pid=""
+    [ -f "$PIDFILE" ] && pid="$(cat "$PIDFILE")"
+    if [ -n "$pid" ] && pid_alive "$pid"; then
+        if curl -fsS -m 5 "http://$HOST:$PORT/v1/models" >/dev/null 2>&1; then
+            echo "localllm: serving $MODEL_ALIAS on http://$HOST:$PORT (pid $pid)"
+            return 0
+        fi
+        echo "localllm: server alive (pid $pid) but HTTP not ready on $HOST:$PORT (model still loading?)"
+        return 1
+    fi
+    if [ -f "$PIDFILE" ]; then
+        rm -f "$PIDFILE"
+        echo "localllm: stale pidfile removed"
+    fi
+    echo "localllm: not serving"
+    return 1
+}
+
+cmd_stop() {
+    if [ ! -f "$PIDFILE" ]; then
+        echo "localllm: not serving (no pidfile)"
+        return 0
+    fi
+    local pid; pid="$(cat "$PIDFILE")"
+    if pid_alive "$pid"; then
+        kill "$pid"
+        for _ in 1 2 3 4 5 6 7 8 9 10; do
+            kill -0 "$pid" 2>/dev/null || break
+            sleep 1
+        done
+        kill -0 "$pid" 2>/dev/null \
+            && fail "pid $pid did not exit after 10s — inspect it manually (refusing to kill -9)"
+        echo "localllm: stopped (pid $pid)"
+    else
+        echo "localllm: stale pidfile (pid $pid is not llama-server) — cleaned"
+    fi
+    rm -f "$PIDFILE"
+}
+
+cmd_config() {
+    local k
+    for k in "${CONFIG_KEYS[@]}"; do
+        echo "$k=${!k}"
+    done
+    echo "config file: $CONFIG_FILE ($([ -f "$CONFIG_FILE" ] && echo present || echo absent))"
+    echo "model path: $MODEL_PATH ($([ -f "$MODEL_PATH" ] && echo present || echo absent))"
+    echo "server binary: $(server_bin)"
+}
+
+case "${1:-}" in
+    serve)  cmd_serve ;;
+    pull)   cmd_pull ;;
+    status) cmd_status ;;
+    stop)   cmd_stop ;;
+    config) cmd_config ;;
+    --version|-v|version) echo "$VERSION" ;;
+    -h|--help|help|"") usage ;;
+    *) echo "localllm: unknown command: $1" >&2; usage >&2; exit 2 ;;
+esac
