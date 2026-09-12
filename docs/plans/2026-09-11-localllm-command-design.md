@@ -1,6 +1,6 @@
 # localllm + qwen Commands Design
 
-**Date:** 2026-09-11
+**Date:** 2026-09-11 (amended same day: client/server split, qwen on Linux, caffeinate)
 **Status:** Approved
 
 ## Overview
@@ -47,18 +47,30 @@ com/localllm/
 ├── remove-darwin     # rm ~/bin/localllm ONLY (see Key decisions)
 └── localllm          # the payload (VERSION= answers --version)
 com/qwen/
-├── setup-darwin      # exec install.sh
-├── install.sh        # brew node + npm install -g @qwen-code/qwen-code@<pin>
-└── remove-darwin     # npm uninstall -g
+├── setup-darwin      # exec install.sh (brew node)
+├── setup-linux       # exec install.sh (any node: system, mise, asdf)
+├── install.sh        # npm install -g @qwen-code/qwen-code@<pin>
+├── remove-darwin     # npm uninstall -g
+└── remove-linux      # npm uninstall -g (same prefix logic)
 ```
 
 Configuration precedence in the payload: built-in defaults (the
 klaus-proven stack: Qwen3.8-27B-UD-Q6_K, 127.0.0.1:8080, ctx 65536, KV
 q8_0) < `~/.config/localllm/config` (seshat-rendered KEY=VALUE, bundle
-`llm.qwen.local` in the dotfiles repo) < environment (`KV_QUANT=f16
+`localllm.server` in the dotfiles repo) < environment (`KV_QUANT=f16
 localllm serve`). `LOCALLLM_CONFIG`, `LOCALLLM_DATA_DIR` and
 `LLAMA_SERVER` relocate config/models/binary — tests use them so they
 never touch real state.
+
+Client/server topology (dotfiles side): the seshat bundles are split so a
+machine can be either or both. `localllm.server` owns
+`~/.config/localllm/config` (model, flags, `bind` — `127.0.0.1` serves
+that machine only, `0.0.0.0` serves the LAN/tailnet) and requires
+`localllm`; `llm.qwen.local` owns `~/.qwen/*` (client) with a
+`server_host` variable (default `127.0.0.1`; point it at the serving
+machine's IP/name for the remote topology) and requires only `qwen`, on
+darwin AND linux. klaus installs both; a client-only box (e.g. the Omarchy
+T14) installs just `llm.qwen.local`.
 
 ## Key decisions
 
@@ -84,6 +96,19 @@ never touch real state.
   (`/opt/homebrew/bin/qwen`) is exactly where our install lands — a
   kora-style guard would refuse forever on every machine that ever
   installed it. `localllm` keeps the guard (the moreutils-`ts` lesson).
+- **Linux qwen installs sudo-free into `~/.local` when needed.** System
+  npm prefixes like `/usr` (Omarchy ships system node) are root-owned;
+  when the prefix isn't user-writable, `npm_config_prefix=$HOME/.local`
+  puts the global under `~/.local/bin` (on PATH via the dotfiles). mise
+  and asdf get a post-install reshim so the new bin resolves for gear's
+  `command -v` gate. No node install on Linux — npm is required, with a
+  pointer to `amun development` (the setup script's only hard dep).
+- **`serve` holds a darwin idle-sleep assertion** (`caffeinate -i -w $$ &`
+  before the exec): remote clients need the serving Mac awake, and `-w`
+  ties the assertion to llama-server's own lifetime without disturbing the
+  pidfile semantics. Lid-close still sleeps — a remote-serving Mac should
+  be on power with the lid open (or use `caffeinate` display assertions
+  out of band).
 - **Exact npm pin** (`@qwen-code/qwen-code@0.23.3`) so `gear info`
   INSTALLED vs AVAILABLE comparison stays meaningful.
 

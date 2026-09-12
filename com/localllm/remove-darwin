@@ -6,5 +6,5 @@
 # state on every update. Full cleanup by hand:
 #   brew uninstall llama.cpp
 #   rm -rf ~/.local/share/localllm ~/.local/state/localllm
-#   seshat remove llm.qwen.local
+#   seshat remove localllm.server
 rm -f "$HOME/bin/localllm"

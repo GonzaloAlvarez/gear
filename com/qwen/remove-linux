@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+# Mirrors install.sh's prefix logic; node stays; ~/.qwen is seshat-owned
+# (bundle llm.qwen.local) and stays too.
+if command -v npm >/dev/null 2>&1; then
+    prefix="$(npm config get prefix 2>/dev/null || echo /usr)"
+    [ -w "$prefix" ] || export npm_config_prefix="$HOME/.local"
+    npm uninstall -g @qwen-code/qwen-code 2>/dev/null || true
+    command -v mise >/dev/null 2>&1 && mise reshim >/dev/null 2>&1 || true
+    command -v asdf >/dev/null 2>&1 && asdf reshim nodejs >/dev/null 2>&1 || true
+fi

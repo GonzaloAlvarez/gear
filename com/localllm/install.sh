@@ -8,7 +8,7 @@
 #
 set -euo pipefail
 
-LOCALLLM_VERSION="1.0.0"   # keep in sync with VERSION= in com/localllm/localllm (`gear info` greps this)
+LOCALLLM_VERSION="1.1.0"   # keep in sync with VERSION= in com/localllm/localllm (`gear info` greps this)
 
 # A foreign binary already on PATH would win gear's `command -v` dispatch
 # forever and this install would be dead code - refuse loudly instead.
@@ -28,4 +28,4 @@ mkdir -p "$HOME/bin"
 cp "$__DIR/localllm" "$HOME/bin/localllm"
 chmod +x "$HOME/bin/localllm"
 echo "localllm installed: $HOME/bin/localllm (v$LOCALLLM_VERSION)"
-echo "note: config is seshat-owned - install it with: seshat install llm.qwen.local"
+echo "note: config is seshat-owned - install it with: seshat install localllm.server"

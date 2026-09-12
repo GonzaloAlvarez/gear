@@ -12,13 +12,13 @@
 #   localllm --version  print version
 #
 # Configuration precedence: built-in defaults < ~/.config/localllm/config
-# (seshat-owned, dotfiles bundle llm.qwen.local) < environment. Ad-hoc
+# (seshat-owned, dotfiles bundle localllm.server) < environment. Ad-hoc
 # override example:  KV_QUANT=f16 localllm serve
 # LOCALLLM_CONFIG / LOCALLLM_DATA_DIR / LLAMA_SERVER relocate the config
 # file, model dir, and server binary (tests rely on these).
 set -euo pipefail
 
-VERSION="1.0.0"   # keep in sync with LOCALLLM_VERSION in com/localllm/install.sh
+VERSION="1.1.0"   # keep in sync with LOCALLLM_VERSION in com/localllm/install.sh
 
 fail() { echo "localllm: $*" >&2; exit 1; }
 usage() { sed -n '2,18p' "$0"; }
@@ -106,6 +106,11 @@ cmd_serve() {
     [ -f "$MODEL_PATH" ] || cmd_pull
     mkdir -p "$STATE_DIR"
     echo $$ > "$PIDFILE"
+    # Remote clients need the Mac awake: hold an idle-sleep assertion for
+    # exactly as long as the server lives (-w waits on our pid through exec).
+    if [ "$(uname -s)" = "Darwin" ] && command -v caffeinate >/dev/null 2>&1; then
+        caffeinate -i -w $$ >/dev/null 2>&1 &
+    fi
     echo "localllm: serving $MODEL_ALIAS on http://$HOST:$PORT (ctx $CTX, kv $KV_QUANT)"
     # exec keeps our pid, so the pidfile IS llama-server's pid.
     # shellcheck disable=SC2086  # EXTRA_ARGS is deliberately word-split
