@@ -8,7 +8,7 @@
 #
 set -euo pipefail
 
-LOCALLLM_VERSION="1.1.0"   # keep in sync with VERSION= in com/localllm/localllm (`gear info` greps this)
+LOCALLLM_VERSION="1.2.0"   # keep in sync with VERSION= in com/localllm/localllm (`gear info` greps this)
 
 # A foreign binary already on PATH would win gear's `command -v` dispatch
 # forever and this install would be dead code - refuse loudly instead.

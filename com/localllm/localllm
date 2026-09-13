@@ -18,13 +18,13 @@
 # file, model dir, and server binary (tests rely on these).
 set -euo pipefail
 
-VERSION="1.1.0"   # keep in sync with LOCALLLM_VERSION in com/localllm/install.sh
+VERSION="1.2.0"   # keep in sync with LOCALLLM_VERSION in com/localllm/install.sh
 
 fail() { echo "localllm: $*" >&2; exit 1; }
 usage() { sed -n '2,18p' "$0"; }
 
 CONFIG_KEYS=(MODEL_HF_REPO MODEL_FILE MODEL_SHA256 MODEL_ALIAS HOST PORT
-             CTX NGL NP FLASH_ATTN KV_QUANT EXTRA_ARGS)
+             CTX NGL NP FLASH_ATTN KV_QUANT SPEC_TYPE EXTRA_ARGS)
 
 # Remember values the environment provided — they must win over the config
 # file, so a plain `KV_QUANT=f16 localllm serve` works without editing state.
@@ -45,6 +45,7 @@ NGL="all"
 NP="1"
 FLASH_ATTN="on"
 KV_QUANT="q8_0"
+SPEC_TYPE="none"
 EXTRA_ARGS=""
 
 CONFIG_FILE="${LOCALLLM_CONFIG:-$HOME/.config/localllm/config}"
@@ -111,13 +112,21 @@ cmd_serve() {
     if [ "$(uname -s)" = "Darwin" ] && command -v caffeinate >/dev/null 2>&1; then
         caffeinate -i -w $$ >/dev/null 2>&1 &
     fi
-    echo "localllm: serving $MODEL_ALIAS on http://$HOST:$PORT (ctx $CTX, kv $KV_QUANT)"
+    # Speculative decoding (e.g. SPEC_TYPE=draft-mtp): a big win on code-like
+    # output, a net LOSS on free-form prose — enable per machine/model after
+    # benchmarking. Plain-string args (not an array): /bin/bash 3.2 on macOS
+    # errors on empty-array expansion under set -u.
+    SPEC_ARGS=""
+    if [ -n "$SPEC_TYPE" ] && [ "$SPEC_TYPE" != "none" ]; then
+        SPEC_ARGS="--spec-type $SPEC_TYPE"
+    fi
+    echo "localllm: serving $MODEL_ALIAS on http://$HOST:$PORT (ctx $CTX, kv $KV_QUANT, spec ${SPEC_TYPE:-none})"
     # exec keeps our pid, so the pidfile IS llama-server's pid.
-    # shellcheck disable=SC2086  # EXTRA_ARGS is deliberately word-split
+    # shellcheck disable=SC2086  # SPEC_ARGS/EXTRA_ARGS are deliberately word-split
     exec "$bin" -m "$MODEL_PATH" -a "$MODEL_ALIAS" \
         -ngl "$NGL" -c "$CTX" -np "$NP" -fa "$FLASH_ATTN" \
         -ctk "$KV_QUANT" -ctv "$KV_QUANT" \
-        --jinja --no-mmproj --host "$HOST" --port "$PORT" $EXTRA_ARGS
+        --jinja --no-mmproj --host "$HOST" --port "$PORT" $SPEC_ARGS $EXTRA_ARGS
 }
 
 cmd_status() {

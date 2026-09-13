@@ -109,6 +109,18 @@ T14) installs just `llm.qwen.local`.
   pidfile semantics. Lid-close still sleeps — a remote-serving Mac should
   be on power with the lid open (or use `caffeinate` display assertions
   out of band).
+- **Speculative decoding is a first-class config key (`SPEC_TYPE`), not
+  `EXTRA_ARGS`.** An unquoted two-word value in the sourced config file
+  (`EXTRA_ARGS=--spec-type draft-mtp`) parses as an env-assignment plus a
+  command — a landmine. `SPEC_TYPE=draft-mtp` is one token; the wrapper
+  expands it to `--spec-type <value>` when set and non-`none`. Off by
+  default: measured on klaus (M4 Max, Qwen3.8-27B UD-Q6_K, build 10809),
+  draft-mtp is +33% on code at temp 0 (15.2 vs 11.4 tok/s), +15% at the
+  qwen client's real sampling (13.7 vs 11.9, 78.8% acceptance), but
+  **−13% on prose** (11.5 vs 13.2) — and upstream reports net LOSS on
+  Metal for small/MoE models (ggml-org/llama.cpp#23752), so enable per
+  machine/model only after an A/B benchmark. Requires MTP tensors in the
+  GGUF (the unsloth Qwen3.8-27B file has them).
 - **Exact npm pin** (`@qwen-code/qwen-code@0.23.3`) so `gear info`
   INSTALLED vs AVAILABLE comparison stays meaningful.
 
