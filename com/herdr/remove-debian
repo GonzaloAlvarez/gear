@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+
+# The binary only; herdr's own config and saved session state are left alone
+# so a reinstall (or `gear update herdr`) comes back to the same workspaces.
+rm -f "$HOME/bin/herdr"
