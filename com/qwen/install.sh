@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 #
 # Install the qwen-code CLI (@qwen-code/qwen-code) as an npm global. Shared
-# by setup-darwin (brew node) and setup-linux (any node: system, mise,
-# asdf). Deliberately NO foreign-binary guard: npm's global bin is exactly
+# by setup-darwin (brew node), setup-debian and setup-linux (any node:
+# system, mise, asdf). Deliberately NO foreign-binary guard: npm's global bin is exactly
 # where this lands, so an existing binary on PATH is a previous install,
 # not a foreign one — a kora-style guard would refuse forever.
 #
@@ -31,6 +31,12 @@ else
     if ! command -v qwen >/dev/null 2>&1; then
         if command -v mise >/dev/null 2>&1; then mise reshim >/dev/null 2>&1 || true; fi
         if command -v asdf >/dev/null 2>&1; then asdf reshim nodejs >/dev/null 2>&1 || true; fi
+    fi
+    # A plain Debian box has ~/bin on PATH (gear's house location) but not
+    # ~/.local/bin: expose the ~/.local install there too.
+    if ! command -v qwen >/dev/null 2>&1 && [ -x "$HOME/.local/bin/qwen" ]; then
+        mkdir -p "$HOME/bin"
+        ln -sf "$HOME/.local/bin/qwen" "$HOME/bin/qwen"
     fi
 fi
 
