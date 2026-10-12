@@ -178,3 +178,7 @@ T14) installs just `llm.qwen.local`.
 - First Linux host: travelblock.lan (Ryzen 7 7840U / Radeon 780M, RADV
   Vulkan). Known limitations above: "darwin-only" is lifted; prebuilt remains
   x86_64 Linux CPU/Vulkan (CUDA/ROCm need a build + `LLAMA_SERVER=`).
+- **MTP on Vulkan (travelblock, 2026-10-11):** `spec-type=draft-mtp` per alias
+  gave +65 % on code (5.4 → 9.0 tok/s, 80 % acceptance) and +33 % on prose
+  (7.2 tok/s) for the dense Qwen3.8-27B UD-Q3_K_XL on the Radeon 780M — the
+  prose loss seen on Metal does not generalise; keep A/B-ing per machine.
