@@ -141,3 +141,40 @@ T14) installs just `llm.qwen.local`.
 - darwin-only. `setup-debian` (prebuilt Linux llama.cpp is CPU/Vulkan;
   CUDA needs a build) and the bundle's `platforms:` lift are the follow-up
   for aeolus-class machines.
+
+## Amendment 2026-10-11 — Linux runtime and router mode (1.3.0)
+
+- **Debian/Linux install.** `setup-debian`/`setup-linux` (+ `remove-*`) are
+  one-line stubs into `install.sh`, which on x86_64 Linux downloads upstream's
+  prebuilt archive (`llama-<build>-bin-ubuntu-vulkan-x64.tar.gz`, or the CPU
+  archive with `LOCALLLM_LLAMA_FLAVOR=cpu`) from the nightly build tag behind
+  the GitHub "latest" release (`v0.6.0` → `nightly-tag.txt` → `b11429`),
+  verifies the GitHub-published sha256, unpacks it under
+  `~/.local/opt/llama.cpp/<build>-<flavor>/` (flat layout; libraries beside
+  the binaries) and writes exec wrappers `~/bin/llama-server`,
+  `~/bin/llama-bench` through a `current` symlink. Pins live next to
+  `LOCALLLM_VERSION` as `LLAMACPP_BUILD` + two digests (names avoid "VERSION"
+  so `gear info` keeps reporting the command version). Root-level deps
+  (libvulkan1, mesa-vulkan-drivers) are only reported — gear never sudoes.
+- **Router mode** (opt-in via `MODEL2_ALIAS`): one `llama-server
+  --models-preset ~/.local/state/localllm/models.ini --models-max N` exposes
+  two model ids. The preset is regenerated on every `serve` from the config:
+  shared flags in `[*]` (so an alias may override them), per-alias tokens from
+  `MODEL_ARGS`/`MODEL2_ARGS` (`key=value`, long flag names, no spaces — JSON
+  such as `chat-template-kwargs={"enable_thinking":false}` qualifies).
+  `MODEL2_FILE` empty = the same GGUF under two aliases (Qwen3.8-27B as
+  `-code` with thinking off and `-think` with `reasoning-effort`); set it for a
+  second GGUF (`pull` fetches both). Nothing model-specific goes on the CLI:
+  the router copies its CLI args onto every child. New keys also:
+  `SERVER_ENV` (exported before exec, e.g. `GGML_VK_PREFER_HOST_MEMORY=1` for
+  APUs) and `SLEEP_IDLE` (`--sleep-idle-seconds`, both modes). Single mode
+  (klaus/minerva) is byte-for-byte the 1.2.0 invocation.
+- **Service.** The dotfiles bundle ships a Linux-only `systemd --user` unit
+  (`~/.config/systemd/user/localllm.service`); enabling it plus
+  `loginctl enable-linger` is operator state. gear still ships only the command.
+- **Pull** verifies with `sha256sum` (Linux) or `shasum` (macOS) and lets the
+  checksum decide when `curl -C -` gets HTTP 416 on an already-complete
+  `.partial`.
+- First Linux host: travelblock.lan (Ryzen 7 7840U / Radeon 780M, RADV
+  Vulkan). Known limitations above: "darwin-only" is lifted; prebuilt remains
+  x86_64 Linux CPU/Vulkan (CUDA/ROCm need a build + `LLAMA_SERVER=`).

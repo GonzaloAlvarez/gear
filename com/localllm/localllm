@@ -2,10 +2,11 @@
 # localllm — on-demand local LLM server (llama.cpp) with model management.
 #
 #   localllm serve      start llama-server FOREGROUND on HOST:PORT
-#                       (auto-pulls the model on first run; persistent
-#                       server: tmux new -s llm 'localllm serve')
-#   localllm pull       download the configured model only (resumable,
-#                       sha256-verified when MODEL_SHA256 is set)
+#                       (auto-pulls the model(s) on first run; persistent
+#                       server: tmux new -s llm 'localllm serve', or the
+#                       seshat-installed user unit on Linux)
+#   localllm pull       download the configured model(s) only (resumable,
+#                       sha256-verified when MODEL*_SHA256 is set)
 #   localllm status     pidfile + HTTP probe of /v1/models; exit 0 = healthy
 #   localllm stop       stop the pidfile-tracked server
 #   localllm config     print the effective configuration
@@ -16,15 +17,36 @@
 # override example:  KV_QUANT=f16 localllm serve
 # LOCALLLM_CONFIG / LOCALLLM_DATA_DIR / LLAMA_SERVER relocate the config
 # file, model dir, and server binary (tests rely on these).
+#
+# Two serving modes, chosen by MODEL2_ALIAS:
+#   single (MODEL2_ALIAS empty)  one model, `llama-server -m … -a MODEL_ALIAS`
+#                                — the original klaus/minerva path, unchanged.
+#   router (MODEL2_ALIAS set)    one llama-server in router mode exposing two
+#                                model ids; a request's "model" field picks
+#                                one, MODELS_MAX bounds how many stay loaded.
+#                                MODEL2_FILE may be empty (same GGUF twice
+#                                with different per-alias settings) or name a
+#                                second GGUF. Per-alias llama-server options
+#                                go in MODEL_ARGS / MODEL2_ARGS as
+#                                space-separated key=value tokens using the
+#                                long flag names without dashes, e.g.
+#                                'chat-template-kwargs={"enable_thinking":false} temp=0.7'.
+#                                The shared flags (ngl/ctx/kv/…) land in the
+#                                preset's [*] section so an alias can override
+#                                them; nothing model-specific goes on the CLI
+#                                because the router copies its CLI onto every
+#                                child.
 set -euo pipefail
 
-VERSION="1.2.0"   # keep in sync with LOCALLLM_VERSION in com/localllm/install.sh
+VERSION="1.3.0"   # keep in sync with LOCALLLM_VERSION in com/localllm/install.sh
 
 fail() { echo "localllm: $*" >&2; exit 1; }
-usage() { sed -n '2,18p' "$0"; }
+usage() { sed -n '2,20p' "$0"; }
 
 CONFIG_KEYS=(MODEL_HF_REPO MODEL_FILE MODEL_SHA256 MODEL_ALIAS HOST PORT
-             CTX NGL NP FLASH_ATTN KV_QUANT SPEC_TYPE EXTRA_ARGS)
+             CTX NGL NP FLASH_ATTN KV_QUANT SPEC_TYPE EXTRA_ARGS
+             MODEL2_HF_REPO MODEL2_FILE MODEL2_SHA256 MODEL2_ALIAS
+             MODEL_ARGS MODEL2_ARGS SERVER_ENV SLEEP_IDLE MODELS_MAX)
 
 # Remember values the environment provided — they must win over the config
 # file, so a plain `KV_QUANT=f16 localllm serve` works without editing state.
@@ -47,6 +69,21 @@ FLASH_ATTN="on"
 KV_QUANT="q8_0"
 SPEC_TYPE="none"
 EXTRA_ARGS=""
+# Router mode (off by default — see the header).
+MODEL2_HF_REPO=""
+MODEL2_FILE=""
+MODEL2_SHA256=""
+MODEL2_ALIAS=""
+MODEL_ARGS=""
+MODEL2_ARGS=""
+# Space-separated NAME=VALUE pairs exported before exec, e.g. the Vulkan
+# APU knob GGML_VK_PREFER_HOST_MEMORY=1. Empty = nothing.
+SERVER_ENV=""
+# llama-server --sleep-idle-seconds: unload the model after N idle seconds
+# (-1 = never). Applies to both modes.
+SLEEP_IDLE="-1"
+# Router mode only: how many models may be resident at once.
+MODELS_MAX="1"
 
 CONFIG_FILE="${LOCALLLM_CONFIG:-$HOME/.config/localllm/config}"
 if [ -f "$CONFIG_FILE" ]; then
@@ -63,7 +100,10 @@ DATA_DIR="${LOCALLLM_DATA_DIR:-$HOME/.local/share/localllm}"
 MODELS_DIR="$DATA_DIR/models"
 STATE_DIR="$HOME/.local/state/localllm"
 PIDFILE="$STATE_DIR/llama-server.pid"
+PRESET_FILE="$STATE_DIR/models.ini"
 MODEL_PATH="$MODELS_DIR/$MODEL_FILE"
+# Slot 2 falls back to slot 1's file: same GGUF, different per-alias settings.
+MODEL2_PATH="$MODELS_DIR/${MODEL2_FILE:-$MODEL_FILE}"
 
 server_bin() { echo "${LLAMA_SERVER:-$(command -v llama-server || true)}"; }
 
@@ -74,24 +114,90 @@ pid_alive() {
         && ps -p "$pid" -o comm= 2>/dev/null | grep -q "llama-server"
 }
 
-cmd_pull() {
-    if [ -f "$MODEL_PATH" ]; then
-        echo "localllm: model present: $MODEL_PATH"
+# sha256_check FILE EXPECTED — coreutils on Linux, Perl shasum on macOS.
+sha256_check() {
+    if command -v sha256sum >/dev/null 2>&1; then
+        echo "$2  $1" | sha256sum -c - >/dev/null
+    else
+        echo "$2  $1" | shasum -a 256 -c - >/dev/null
+    fi
+}
+
+# pull_one REPO FILE SHA256 — resumable download into MODELS_DIR.
+pull_one() {
+    local repo="$1" file="$2" sha="$3"
+    local path="$MODELS_DIR/$file" partial="$MODELS_DIR/$file.partial"
+    if [ -f "$path" ]; then
+        echo "localllm: model present: $path"
         return 0
     fi
     mkdir -p "$MODELS_DIR"
-    local url="https://huggingface.co/$MODEL_HF_REPO/resolve/main/$MODEL_FILE"
-    local partial="$MODEL_PATH.partial"
-    echo "localllm: pulling $MODEL_FILE from $MODEL_HF_REPO (resumable)"
-    # Stable .partial path (not mktemp) is what makes -C - resume work.
-    curl -fL -C - --retry 3 "$url" -o "$partial"
-    if [ -n "$MODEL_SHA256" ]; then
+    local url="https://huggingface.co/$repo/resolve/main/$file"
+    echo "localllm: pulling $file from $repo (resumable)"
+    # Stable .partial path (not mktemp) is what makes -C - resume work. A
+    # .partial that is already complete makes the server answer 416 and curl
+    # fail — let the checksum decide instead of giving up.
+    local fetched=1
+    curl -fL -C - --retry 3 "$url" -o "$partial" || fetched=0
+    [ -s "$partial" ] || fail "download failed: $url"
+    if [ -n "$sha" ]; then
         echo "localllm: verifying sha256"
-        echo "$MODEL_SHA256  $partial" | shasum -a 256 -c - >/dev/null \
-            || fail "sha256 mismatch for $partial — delete it and re-pull"
+        if ! sha256_check "$partial" "$sha"; then
+            [ "$fetched" = 1 ] || fail "download incomplete — re-run 'localllm pull' to resume (delete $partial if it keeps failing)"
+            fail "sha256 mismatch for $partial — delete it and re-pull"
+        fi
+    elif [ "$fetched" = 0 ]; then
+        fail "download failed and no sha256 to verify $partial against — re-run or delete it"
     fi
-    mv "$partial" "$MODEL_PATH"
-    echo "localllm: model ready: $MODEL_PATH"
+    mv "$partial" "$path"
+    echo "localllm: model ready: $path"
+}
+
+cmd_pull() {
+    pull_one "$MODEL_HF_REPO" "$MODEL_FILE" "$MODEL_SHA256"
+    if [ -n "$MODEL2_FILE" ] && [ "$MODEL2_FILE" != "$MODEL_FILE" ]; then
+        pull_one "${MODEL2_HF_REPO:-$MODEL_HF_REPO}" "$MODEL2_FILE" "$MODEL2_SHA256"
+    fi
+}
+
+# preset_lines "k=v k=v …" → "k = v" lines (tokens carry no spaces by contract).
+preset_lines() {
+    local tok
+    for tok in $1; do
+        case "$tok" in
+            *=*) echo "${tok%%=*} = ${tok#*=}" ;;
+            *)   fail "bad MODEL_ARGS token '$tok' (want key=value)" ;;
+        esac
+    done
+}
+
+# Router preset: regenerated on every serve from the effective config.
+write_preset() {
+    mkdir -p "$STATE_DIR"
+    {
+        echo "; generated by localllm serve — change ~/.config/localllm/config (seshat), not this file"
+        echo "version = 1"
+        echo
+        echo "[*]"
+        echo "n-gpu-layers = $NGL"
+        echo "ctx-size = $CTX"
+        echo "parallel = $NP"
+        echo "flash-attn = $FLASH_ATTN"
+        echo "cache-type-k = $KV_QUANT"
+        echo "cache-type-v = $KV_QUANT"
+        if [ -n "$SPEC_TYPE" ] && [ "$SPEC_TYPE" != "none" ]; then
+            echo "spec-type = $SPEC_TYPE"
+        fi
+        echo
+        echo "[$MODEL_ALIAS]"
+        echo "model = $MODEL_PATH"
+        echo "load-on-startup = true"
+        preset_lines "$MODEL_ARGS"
+        echo
+        echo "[$MODEL2_ALIAS]"
+        echo "model = $MODEL2_PATH"
+        preset_lines "$MODEL2_ARGS"
+    } > "$PRESET_FILE"
 }
 
 cmd_serve() {
@@ -104,7 +210,7 @@ cmd_serve() {
     if curl -fsS -m 2 "http://$HOST:$PORT/v1/models" >/dev/null 2>&1; then
         fail "something else is already listening on $HOST:$PORT"
     fi
-    [ -f "$MODEL_PATH" ] || cmd_pull
+    cmd_pull >/dev/null
     mkdir -p "$STATE_DIR"
     echo $$ > "$PIDFILE"
     # Remote clients need the Mac awake: hold an idle-sleep assertion for
@@ -112,29 +218,51 @@ cmd_serve() {
     if [ "$(uname -s)" = "Darwin" ] && command -v caffeinate >/dev/null 2>&1; then
         caffeinate -i -w $$ >/dev/null 2>&1 &
     fi
+    if [ -n "$SERVER_ENV" ]; then
+        # shellcheck disable=SC2086,SC2163  # deliberately word-split NAME=VALUE pairs
+        export $SERVER_ENV
+    fi
+    # Plain-string args (not arrays): /bin/bash 3.2 on macOS errors on
+    # empty-array expansion under set -u.
+    SLEEP_ARGS=""
+    if [ -n "$SLEEP_IDLE" ] && [ "$SLEEP_IDLE" != "-1" ]; then
+        SLEEP_ARGS="--sleep-idle-seconds $SLEEP_IDLE"
+    fi
+    if [ -n "$MODEL2_ALIAS" ]; then
+        write_preset
+        echo "localllm: serving $MODEL_ALIAS + $MODEL2_ALIAS (router, $MODELS_MAX resident) on http://$HOST:$PORT (ctx $CTX, kv $KV_QUANT, ngl $NGL)"
+        # exec keeps our pid, so the pidfile IS llama-server's pid.
+        # shellcheck disable=SC2086  # SLEEP_ARGS/EXTRA_ARGS are deliberately word-split
+        exec "$bin" --models-preset "$PRESET_FILE" --models-max "$MODELS_MAX" \
+            --jinja --host "$HOST" --port "$PORT" $SLEEP_ARGS $EXTRA_ARGS
+    fi
     # Speculative decoding (e.g. SPEC_TYPE=draft-mtp): a big win on code-like
     # output, a net LOSS on free-form prose — enable per machine/model after
-    # benchmarking. Plain-string args (not an array): /bin/bash 3.2 on macOS
-    # errors on empty-array expansion under set -u.
+    # benchmarking.
     SPEC_ARGS=""
     if [ -n "$SPEC_TYPE" ] && [ "$SPEC_TYPE" != "none" ]; then
         SPEC_ARGS="--spec-type $SPEC_TYPE"
     fi
     echo "localllm: serving $MODEL_ALIAS on http://$HOST:$PORT (ctx $CTX, kv $KV_QUANT, spec ${SPEC_TYPE:-none})"
     # exec keeps our pid, so the pidfile IS llama-server's pid.
-    # shellcheck disable=SC2086  # SPEC_ARGS/EXTRA_ARGS are deliberately word-split
+    # shellcheck disable=SC2086  # SPEC_ARGS/SLEEP_ARGS/EXTRA_ARGS are deliberately word-split
     exec "$bin" -m "$MODEL_PATH" -a "$MODEL_ALIAS" \
         -ngl "$NGL" -c "$CTX" -np "$NP" -fa "$FLASH_ATTN" \
         -ctk "$KV_QUANT" -ctv "$KV_QUANT" \
-        --jinja --no-mmproj --host "$HOST" --port "$PORT" $SPEC_ARGS $EXTRA_ARGS
+        --jinja --no-mmproj --host "$HOST" --port "$PORT" $SPEC_ARGS $SLEEP_ARGS $EXTRA_ARGS
 }
 
 cmd_status() {
     local pid=""
     [ -f "$PIDFILE" ] && pid="$(cat "$PIDFILE")"
     if [ -n "$pid" ] && pid_alive "$pid"; then
-        if curl -fsS -m 5 "http://$HOST:$PORT/v1/models" >/dev/null 2>&1; then
-            echo "localllm: serving $MODEL_ALIAS on http://$HOST:$PORT (pid $pid)"
+        local models
+        if models="$(curl -fsS -m 5 "http://$HOST:$PORT/v1/models" 2>/dev/null)"; then
+            if [ -n "$MODEL2_ALIAS" ]; then
+                echo "localllm: serving $(echo "$models" | grep -o '"id":"[^"]*"' | cut -d'"' -f4 | paste -sd, -) (router) on http://$HOST:$PORT (pid $pid)"
+            else
+                echo "localllm: serving $MODEL_ALIAS on http://$HOST:$PORT (pid $pid)"
+            fi
             return 0
         fi
         echo "localllm: server alive (pid $pid) but HTTP not ready on $HOST:$PORT (model still loading?)"
@@ -174,8 +302,13 @@ cmd_config() {
     for k in "${CONFIG_KEYS[@]}"; do
         echo "$k=${!k}"
     done
+    echo "mode: $([ -n "$MODEL2_ALIAS" ] && echo router || echo single)"
     echo "config file: $CONFIG_FILE ($([ -f "$CONFIG_FILE" ] && echo present || echo absent))"
     echo "model path: $MODEL_PATH ($([ -f "$MODEL_PATH" ] && echo present || echo absent))"
+    if [ -n "$MODEL2_ALIAS" ]; then
+        echo "model2 path: $MODEL2_PATH ($([ -f "$MODEL2_PATH" ] && echo present || echo absent))"
+        echo "preset file: $PRESET_FILE (regenerated by serve)"
+    fi
     echo "server binary: $(server_bin)"
 }
 

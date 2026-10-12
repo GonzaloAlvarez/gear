@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+# gear update = remove + setup, so this stays conservative: the runtime
+# archive under ~/.local/opt/llama.cpp (re-linked by install.sh), the models
+# (~/.local/share/localllm), the state dir and the seshat-owned config all
+# survive. Full wipe by hand:
+#   rm -rf ~/.local/opt/llama.cpp ~/.local/share/localllm ~/.local/state/localllm
+#   seshat remove localllm.server
+
+rm -f "$HOME/bin/localllm" "$HOME/bin/llama-server" "$HOME/bin/llama-bench"
