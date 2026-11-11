@@ -182,3 +182,17 @@ T14) installs just `llm.qwen.local`.
   gave +65 % on code (5.4 → 9.0 tok/s, 80 % acceptance) and +33 % on prose
   (7.2 tok/s) for the dense Qwen3.8-27B UD-Q3_K_XL on the Radeon 780M — the
   prose loss seen on Metal does not generalise; keep A/B-ing per machine.
+
+## Amendment 2026-11-11 — Unsloth Dynamic 3.1 default (1.3.1)
+
+- Unsloth re-uploaded the Qwen3.8-27B GGUFs from 2-bit to 6-bit as "Dynamic
+  3.1" (repo commits "New UD3.1 quants", 2026-11-10/11) under the **same file
+  names**; only the sha256 changed (`UD-Q6_K`: `c9c20681…` → `6cac55f8…`;
+  `UD-Q3_K_XL` was not re-cut and keeps `8c2a45ff…`). The wrapper default and
+  the `localllm.server` bundle default now carry the UD3.1 digest.
+- `pull` treats a present file as done, so a box upgrades by moving the old
+  GGUF aside (`mv Qwen3.8-27B-UD-Q6_K.gguf Qwen3.8-27B-UD-Q6_K.ud30.gguf`),
+  setting the new digest (`seshat install localllm.server --set
+  model_sha256=…`), `localllm pull`, then `localllm stop` + `serve`. The
+  running server keeps its mmap of the renamed inode, so the download can
+  happen while the old file still serves. klaus upgraded this way 2026-11-11.

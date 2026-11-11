@@ -38,7 +38,7 @@
 #                                child.
 set -euo pipefail
 
-VERSION="1.3.0"   # keep in sync with LOCALLLM_VERSION in com/localllm/install.sh
+VERSION="1.3.1"   # keep in sync with LOCALLLM_VERSION in com/localllm/install.sh
 
 fail() { echo "localllm: $*" >&2; exit 1; }
 usage() { sed -n '2,20p' "$0"; }
@@ -58,7 +58,11 @@ done
 # normally overrides all of these.
 MODEL_HF_REPO="unsloth/Qwen3.8-27B-GGUF"
 MODEL_FILE="Qwen3.8-27B-UD-Q6_K.gguf"
-MODEL_SHA256="c9c206812fbe4ac7b76a729e25928b63f2ae89d37f69da7a71c20aec763cd436"
+# Unsloth re-cut the 2-6 bit files as "Dynamic 3.1" on 2026-11-10/11 under
+# the same names; this is the UD3.1 Q6_K. The August UD3.0 file was
+# c9c206812fbe…cd436. `pull` skips a file that is already present, so an
+# upgrade moves the old GGUF aside first (see the dotfiles bundle notes).
+MODEL_SHA256="6cac55f876015d6d4b94b1656d23f79f424ac9b583652aedf0633dba116576a8"
 MODEL_ALIAS="qwen3.8-27b-local"
 HOST="127.0.0.1"
 PORT="8080"
