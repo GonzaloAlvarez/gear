@@ -1,10 +1,13 @@
 #!/usr/bin/env bash
-# Conservative removal: only the wrapper. brew llama.cpp, downloaded models
+# Conservative removal: only the wrapper. The pinned llama.cpp archive
+# (~/.local/opt/llama.cpp + the ~/bin/llama-server|llama-bench exec wrappers),
+# a brew llama.cpp if one was ever installed, downloaded models
 # (~/.local/share/localllm) and the seshat-owned config
 # (~/.config/localllm/config) are intentionally kept — `gear update` is
-# remove+setup, and removing them here would churn brew and orphan seshat
-# state on every update. Full cleanup by hand:
-#   brew uninstall llama.cpp
+# remove+setup, and removing them here would re-download the archive, churn
+# brew and orphan seshat state on every update. Full cleanup by hand:
+#   rm -rf ~/.local/opt/llama.cpp ~/bin/llama-server ~/bin/llama-bench
+#   brew uninstall llama.cpp          # only if brew ever installed it
 #   rm -rf ~/.local/share/localllm ~/.local/state/localllm
 #   seshat remove localllm.server
 rm -f "$HOME/bin/localllm"

@@ -196,3 +196,31 @@ T14) installs just `llm.qwen.local`.
   model_sha256=…`), `localllm pull`, then `localllm stop` + `serve`. The
   running server keeps its mmap of the renamed inode, so the download can
   happen while the old file still serves. klaus upgraded this way 2026-11-11.
+
+## Amendment 2026-11-21 — upstream prebuilt llama.cpp on macOS too (1.4.0)
+
+- Inkling 2 Mini (Thinking Machines, released 2026-11-20) needs the looped
+  `inkling2_loop` architecture that mainline llama.cpp merged the same day
+  (ggml-org/llama.cpp#32694, first in nightly b12598+). Homebrew's bottle was
+  1.0.0 = b12359 and klaus still ran 0.9.0 = b12110, so "brew's prebuilt
+  Metal llama-server" (the 2026-09-11 decision) became the bottleneck.
+- `install.sh` now installs upstream's prebuilt **macOS arm64** archive
+  (`llama-<build>-bin-macos-arm64.tar.gz`, flat layout like the Linux one,
+  ad-hoc linker-signed, Metal + Accelerate backends) under
+  `~/.local/opt/llama.cpp/<build>-metal` with the same `current` symlink and
+  `~/bin/llama-server` / `llama-bench` exec wrappers the Linux path uses.
+  Pins are per platform: `LLAMACPP_BUILD_DARWIN=b12602` (sha256 in the
+  script), `LLAMACPP_BUILD_LINUX=b11429` unchanged (travelblock's proven
+  Vulkan build; bump it only after testing there).
+  `LOCALLLM_LLAMA_FLAVOR=brew` keeps the Homebrew path (and unlinks a pinned
+  archive so brew's binary serves); Intel Macs fall back to it.
+- The wrapper's `server_bin()` prefers `LLAMA_SERVER`, then
+  `~/.local/opt/llama.cpp/current/llama-server`, then PATH — so a brew
+  `llama-server` left on PATH (klaus keeps its 0.9.0 keg) never decides
+  which build serves. `status` and `config` print the build.
+- Verified with the nightly on an M4 Pro before rollout: `--list-devices`
+  shows `MTL0`, and every key the router preset writes still exists
+  (`chat-template-kwargs`, `reasoning-effort`, `spec-type draft-mtp`,
+  `models-preset`, `presence-penalty`, …). Rollout = `git -C ~/.gear pull
+  && gear update localllm`, then `localllm stop` + `tmux new -d -s llm
+  'localllm serve'`.
