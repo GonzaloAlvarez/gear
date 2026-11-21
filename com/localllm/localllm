@@ -21,27 +21,33 @@
 # ~/.local/opt/llama.cpp/current (upstream nightly: Metal on Apple silicon,
 # Vulkan/CPU on x86_64 Linux); LLAMA_SERVER overrides it, PATH is the fallback.
 #
-# Two serving modes, chosen by MODEL2_ALIAS:
-#   single (MODEL2_ALIAS empty)  one model, `llama-server -m … -a MODEL_ALIAS`
-#                                — the original klaus/minerva path, unchanged.
-#   router (MODEL2_ALIAS set)    one llama-server in router mode exposing two
-#                                model ids; a request's "model" field picks
-#                                one, MODELS_MAX bounds how many stay loaded.
-#                                MODEL2_FILE may be empty (same GGUF twice
-#                                with different per-alias settings) or name a
-#                                second GGUF. Per-alias llama-server options
-#                                go in MODEL_ARGS / MODEL2_ARGS as
+# Two serving modes:
+#   single (no MODEL2_ALIAS/MODEL3_ALIAS)  one model, `llama-server -m … -a
+#                                MODEL_ALIAS` — the original path, unchanged.
+#   router (MODEL2_ALIAS and/or MODEL3_ALIAS set)  one llama-server in router
+#                                mode exposing up to three model ids; a
+#                                request's "model" field picks one, MODELS_MAX
+#                                bounds how many stay loaded. MODEL2_FILE /
+#                                MODEL3_FILE may be empty (slot 1's GGUF under
+#                                another alias with different settings) or
+#                                name their own GGUF (own HF_REPO/SHA256).
+#                                Per-alias llama-server options go in
+#                                MODEL_ARGS / MODEL2_ARGS / MODEL3_ARGS as
 #                                space-separated key=value tokens using the
 #                                long flag names without dashes, e.g.
-#                                'chat-template-kwargs={"enable_thinking":false} temp=0.7'.
-#                                The shared flags (ngl/ctx/kv/…) land in the
-#                                preset's [*] section so an alias can override
-#                                them; nothing model-specific goes on the CLI
-#                                because the router copies its CLI onto every
-#                                child.
+#                                'reasoning=off temp=0.7' or, for a model
+#                                without an MTP head next to one that uses it,
+#                                'spec-type=none'. The shared flags
+#                                (ngl/ctx/kv/spec) land in the preset's [*]
+#                                section so an alias can override them;
+#                                nothing model-specific goes on the CLI because
+#                                the router copies its CLI onto every child.
+# Vision: MODEL_MMPROJ_FILE / MODEL2_MMPROJ_FILE / MODEL3_MMPROJ_FILE (+ _SHA256)
+# name a multimodal projector GGUF from the slot's HF repo; `pull` fetches it
+# and the slot is served with --mmproj (single mode: --no-mmproj when unset).
 set -euo pipefail
 
-VERSION="1.4.0"   # keep in sync with LOCALLLM_VERSION in com/localllm/install.sh
+VERSION="1.5.0"   # keep in sync with LOCALLLM_VERSION in com/localllm/install.sh
 
 fail() { echo "localllm: $*" >&2; exit 1; }
 usage() { sed -n '2,20p' "$0"; }
@@ -49,7 +55,11 @@ usage() { sed -n '2,20p' "$0"; }
 CONFIG_KEYS=(MODEL_HF_REPO MODEL_FILE MODEL_SHA256 MODEL_ALIAS HOST PORT
              CTX NGL NP FLASH_ATTN KV_QUANT SPEC_TYPE EXTRA_ARGS
              MODEL2_HF_REPO MODEL2_FILE MODEL2_SHA256 MODEL2_ALIAS
-             MODEL_ARGS MODEL2_ARGS SERVER_ENV SLEEP_IDLE MODELS_MAX)
+             MODEL3_HF_REPO MODEL3_FILE MODEL3_SHA256 MODEL3_ALIAS
+             MODEL_ARGS MODEL2_ARGS MODEL3_ARGS
+             MODEL_MMPROJ_FILE MODEL_MMPROJ_SHA256 MODEL2_MMPROJ_FILE MODEL2_MMPROJ_SHA256
+             MODEL3_MMPROJ_FILE MODEL3_MMPROJ_SHA256
+             SERVER_ENV SLEEP_IDLE MODELS_MAX)
 
 # Remember values the environment provided — they must win over the config
 # file, so a plain `KV_QUANT=f16 localllm serve` works without editing state.
@@ -83,6 +93,18 @@ MODEL2_SHA256=""
 MODEL2_ALIAS=""
 MODEL_ARGS=""
 MODEL2_ARGS=""
+# Slot 3 (router mode only) and the optional per-slot vision projectors.
+MODEL3_HF_REPO=""
+MODEL3_FILE=""
+MODEL3_SHA256=""
+MODEL3_ALIAS=""
+MODEL3_ARGS=""
+MODEL_MMPROJ_FILE=""
+MODEL_MMPROJ_SHA256=""
+MODEL2_MMPROJ_FILE=""
+MODEL2_MMPROJ_SHA256=""
+MODEL3_MMPROJ_FILE=""
+MODEL3_MMPROJ_SHA256=""
 # Space-separated NAME=VALUE pairs exported before exec, e.g. the Vulkan
 # APU knob GGML_VK_PREFER_HOST_MEMORY=1. Empty = nothing.
 SERVER_ENV=""
@@ -109,8 +131,21 @@ STATE_DIR="$HOME/.local/state/localllm"
 PIDFILE="$STATE_DIR/llama-server.pid"
 PRESET_FILE="$STATE_DIR/models.ini"
 MODEL_PATH="$MODELS_DIR/$MODEL_FILE"
-# Slot 2 falls back to slot 1's file: same GGUF, different per-alias settings.
+# Slots 2/3 fall back to slot 1's file: same GGUF, different per-alias settings.
 MODEL2_PATH="$MODELS_DIR/${MODEL2_FILE:-$MODEL_FILE}"
+MODEL3_PATH="$MODELS_DIR/${MODEL3_FILE:-$MODEL_FILE}"
+# Projector paths are empty when the slot has none.
+MODEL_MMPROJ_PATH="${MODEL_MMPROJ_FILE:+$MODELS_DIR/$MODEL_MMPROJ_FILE}"
+MODEL2_MMPROJ_PATH="${MODEL2_MMPROJ_FILE:+$MODELS_DIR/$MODEL2_MMPROJ_FILE}"
+MODEL3_MMPROJ_PATH="${MODEL3_MMPROJ_FILE:+$MODELS_DIR/$MODEL3_MMPROJ_FILE}"
+
+router_mode() { [ -n "$MODEL2_ALIAS" ] || [ -n "$MODEL3_ALIAS" ]; }
+alias_list() {  # "a + b + c" of the configured aliases
+    local out="$MODEL_ALIAS"
+    [ -n "$MODEL2_ALIAS" ] && out="$out + $MODEL2_ALIAS"
+    [ -n "$MODEL3_ALIAS" ] && out="$out + $MODEL3_ALIAS"
+    echo "$out"
+}
 
 # Server binary: an explicit LLAMA_SERVER wins; then the archive gear pinned
 # under ~/.local/opt/llama.cpp (install.sh), so neither a newer nor an older
@@ -178,9 +213,17 @@ pull_one() {
 
 cmd_pull() {
     pull_one "$MODEL_HF_REPO" "$MODEL_FILE" "$MODEL_SHA256"
+    [ -n "$MODEL_MMPROJ_FILE" ] && pull_one "$MODEL_HF_REPO" "$MODEL_MMPROJ_FILE" "$MODEL_MMPROJ_SHA256"
     if [ -n "$MODEL2_FILE" ] && [ "$MODEL2_FILE" != "$MODEL_FILE" ]; then
         pull_one "${MODEL2_HF_REPO:-$MODEL_HF_REPO}" "$MODEL2_FILE" "$MODEL2_SHA256"
     fi
+    [ -n "$MODEL2_MMPROJ_FILE" ] && pull_one "${MODEL2_HF_REPO:-$MODEL_HF_REPO}" "$MODEL2_MMPROJ_FILE" "$MODEL2_MMPROJ_SHA256"
+    # Slot 3 only downloads when it is actually served (an alias is set).
+    if [ -n "$MODEL3_ALIAS" ] && [ -n "$MODEL3_FILE" ] && [ "$MODEL3_FILE" != "$MODEL_FILE" ]; then
+        pull_one "${MODEL3_HF_REPO:-$MODEL_HF_REPO}" "$MODEL3_FILE" "$MODEL3_SHA256"
+    fi
+    [ -n "$MODEL3_ALIAS" ] && [ -n "$MODEL3_MMPROJ_FILE" ] && pull_one "${MODEL3_HF_REPO:-$MODEL_HF_REPO}" "$MODEL3_MMPROJ_FILE" "$MODEL3_MMPROJ_SHA256"
+    return 0
 }
 
 # preset_lines "k=v k=v …" → "k = v" lines (tokens carry no spaces by contract).
@@ -192,6 +235,17 @@ preset_lines() {
             *)   fail "bad MODEL_ARGS token '$tok' (want key=value)" ;;
         esac
     done
+}
+
+# preset_slot ALIAS MODEL_PATH MMPROJ_PATH ARGS [startup] → one [alias] section.
+preset_slot() {
+    echo
+    echo "[$1]"
+    echo "model = $2"
+    [ -n "$3" ] && echo "mmproj = $3"
+    [ "${5:-}" = "startup" ] && echo "load-on-startup = true"
+    preset_lines "$4"
+    return 0
 }
 
 # Router preset: regenerated on every serve from the effective config.
@@ -211,15 +265,10 @@ write_preset() {
         if [ -n "$SPEC_TYPE" ] && [ "$SPEC_TYPE" != "none" ]; then
             echo "spec-type = $SPEC_TYPE"
         fi
-        echo
-        echo "[$MODEL_ALIAS]"
-        echo "model = $MODEL_PATH"
-        echo "load-on-startup = true"
-        preset_lines "$MODEL_ARGS"
-        echo
-        echo "[$MODEL2_ALIAS]"
-        echo "model = $MODEL2_PATH"
-        preset_lines "$MODEL2_ARGS"
+        preset_slot "$MODEL_ALIAS" "$MODEL_PATH" "$MODEL_MMPROJ_PATH" "$MODEL_ARGS" startup
+        [ -n "$MODEL2_ALIAS" ] && preset_slot "$MODEL2_ALIAS" "$MODEL2_PATH" "$MODEL2_MMPROJ_PATH" "$MODEL2_ARGS"
+        [ -n "$MODEL3_ALIAS" ] && preset_slot "$MODEL3_ALIAS" "$MODEL3_PATH" "$MODEL3_MMPROJ_PATH" "$MODEL3_ARGS"
+        true
     } > "$PRESET_FILE"
 }
 
@@ -251,9 +300,9 @@ cmd_serve() {
     if [ -n "$SLEEP_IDLE" ] && [ "$SLEEP_IDLE" != "-1" ]; then
         SLEEP_ARGS="--sleep-idle-seconds $SLEEP_IDLE"
     fi
-    if [ -n "$MODEL2_ALIAS" ]; then
+    if router_mode; then
         write_preset
-        echo "localllm: serving $MODEL_ALIAS + $MODEL2_ALIAS (router, $MODELS_MAX resident) on http://$HOST:$PORT (ctx $CTX, kv $KV_QUANT, ngl $NGL)"
+        echo "localllm: serving $(alias_list) (router, $MODELS_MAX resident) on http://$HOST:$PORT (ctx $CTX, kv $KV_QUANT, ngl $NGL)"
         # exec keeps our pid, so the pidfile IS llama-server's pid.
         # shellcheck disable=SC2086  # SLEEP_ARGS/EXTRA_ARGS are deliberately word-split
         exec "$bin" --models-preset "$PRESET_FILE" --models-max "$MODELS_MAX" \
@@ -266,13 +315,15 @@ cmd_serve() {
     if [ -n "$SPEC_TYPE" ] && [ "$SPEC_TYPE" != "none" ]; then
         SPEC_ARGS="--spec-type $SPEC_TYPE"
     fi
+    # Vision projector (quoted path, so it goes through "$@" not a plain string).
+    if [ -n "$MODEL_MMPROJ_PATH" ]; then set -- --mmproj "$MODEL_MMPROJ_PATH"; else set -- --no-mmproj; fi
     echo "localllm: serving $MODEL_ALIAS on http://$HOST:$PORT (ctx $CTX, kv $KV_QUANT, spec ${SPEC_TYPE:-none})"
     # exec keeps our pid, so the pidfile IS llama-server's pid.
     # shellcheck disable=SC2086  # SPEC_ARGS/SLEEP_ARGS/EXTRA_ARGS are deliberately word-split
     exec "$bin" -m "$MODEL_PATH" -a "$MODEL_ALIAS" \
         -ngl "$NGL" -c "$CTX" -np "$NP" -fa "$FLASH_ATTN" \
         -ctk "$KV_QUANT" -ctv "$KV_QUANT" \
-        --jinja --no-mmproj --host "$HOST" --port "$PORT" $SPEC_ARGS $SLEEP_ARGS $EXTRA_ARGS
+        --jinja "$@" --host "$HOST" --port "$PORT" $SPEC_ARGS $SLEEP_ARGS $EXTRA_ARGS
 }
 
 cmd_status() {
@@ -281,7 +332,7 @@ cmd_status() {
     if [ -n "$pid" ] && pid_alive "$pid"; then
         local models
         if models="$(curl -fsS -m 5 "http://$HOST:$PORT/v1/models" 2>/dev/null)"; then
-            if [ -n "$MODEL2_ALIAS" ]; then
+            if router_mode; then
                 echo "localllm: serving $(echo "$models" | grep -o '"id":"[^"]*"' | cut -d'"' -f4 | paste -sd, -) (router) on http://$HOST:$PORT (pid $pid)"
             else
                 echo "localllm: serving $MODEL_ALIAS on http://$HOST:$PORT (pid $pid)"
@@ -327,11 +378,15 @@ cmd_config() {
     for k in "${CONFIG_KEYS[@]}"; do
         echo "$k=${!k}"
     done
-    echo "mode: $([ -n "$MODEL2_ALIAS" ] && echo router || echo single)"
+    echo "mode: $(router_mode && echo router || echo single)"
     echo "config file: $CONFIG_FILE ($([ -f "$CONFIG_FILE" ] && echo present || echo absent))"
     echo "model path: $MODEL_PATH ($([ -f "$MODEL_PATH" ] && echo present || echo absent))"
-    if [ -n "$MODEL2_ALIAS" ]; then
-        echo "model2 path: $MODEL2_PATH ($([ -f "$MODEL2_PATH" ] && echo present || echo absent))"
+    [ -n "$MODEL_MMPROJ_PATH" ] && echo "mmproj path: $MODEL_MMPROJ_PATH ($([ -f "$MODEL_MMPROJ_PATH" ] && echo present || echo absent))"
+    if router_mode; then
+        [ -n "$MODEL2_ALIAS" ] && echo "model2 path: $MODEL2_PATH ($([ -f "$MODEL2_PATH" ] && echo present || echo absent))"
+        [ -n "$MODEL2_MMPROJ_PATH" ] && echo "model2 mmproj: $MODEL2_MMPROJ_PATH ($([ -f "$MODEL2_MMPROJ_PATH" ] && echo present || echo absent))"
+        [ -n "$MODEL3_ALIAS" ] && echo "model3 path: $MODEL3_PATH ($([ -f "$MODEL3_PATH" ] && echo present || echo absent))"
+        [ -n "$MODEL3_MMPROJ_PATH" ] && echo "model3 mmproj: $MODEL3_MMPROJ_PATH ($([ -f "$MODEL3_MMPROJ_PATH" ] && echo present || echo absent))"
         echo "preset file: $PRESET_FILE (regenerated by serve)"
     fi
     echo "server binary: $(server_bin) ($(server_version))"

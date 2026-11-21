@@ -18,7 +18,7 @@
 #
 set -euo pipefail
 
-LOCALLLM_VERSION="1.4.0"   # keep in sync with VERSION= in com/localllm/localllm (`gear info` greps the FIRST *VERSION= line — keep it this one)
+LOCALLLM_VERSION="1.5.0"   # keep in sync with VERSION= in com/localllm/localllm (`gear info` greps the FIRST *VERSION= line — keep it this one)
 
 # Runtime pins. llama.cpp publishes binaries under nightly build tags; the
 # GitHub "latest" release carries only a nightly-tag.txt pointing at one.

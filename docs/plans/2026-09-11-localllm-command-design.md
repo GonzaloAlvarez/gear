@@ -224,3 +224,22 @@ T14) installs just `llm.qwen.local`.
   `models-preset`, `presence-penalty`, …). Rollout = `git -C ~/.gear pull
   && gear update localllm`, then `localllm stop` + `tmux new -d -s llm
   'localllm serve'`.
+
+## Amendment 2026-11-21 — third alias slot + vision projectors (1.5.0)
+
+- Router mode now carries up to three slots: `MODEL3_{HF_REPO,FILE,SHA256,ALIAS,ARGS}`
+  mirror slot 2; router mode is on when `MODEL2_ALIAS` **or** `MODEL3_ALIAS` is
+  set; slot 3 is pulled only when its alias is set (a stray file name never
+  costs a 17 GB download). `MODEL{,2,3}_MMPROJ_FILE` + `_SHA256` name a
+  multimodal projector from the slot's repo — pulled like a model, written as
+  `mmproj = <path>` in that alias' section (single mode: `--mmproj <path>`
+  instead of `--no-mmproj`).
+- Why: Inkling 2 Mini (ggml-org `IQ4_NL`, 17.6 GB, vision) joins klaus next
+  to the two Qwen aliases. `spec-type` stays in `[*]` (Qwen's MTP); the
+  Inkling alias overrides it with `spec-type=none` in `MODEL3_ARGS` because
+  the model has no MTP head. One model resident (`MODELS_MAX=1`) — 36 GB
+  cannot hold both.
+- Dry-run harness used for the change: fake `HOME`, `LOCALLLM_CONFIG`,
+  `LOCALLLM_DATA_DIR` with empty model files and `LLAMA_SERVER` pointing at a
+  stub that prints its args and the preset — exercises `pull` gating,
+  `write_preset` and both exec paths with no download and no GPU.
