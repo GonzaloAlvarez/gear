@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+# The binary only; ~/.config/opencode (seshat-owned opencode.json) and
+# ~/.local/share/opencode (sessions) are left alone so a reinstall or
+# `gear update opencode` comes back to the same state.
+rm -f "$HOME/bin/opencode"
