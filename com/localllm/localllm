@@ -121,10 +121,14 @@ server_bin() {
     if [ -x "$pinned" ]; then echo "$pinned"; return; fi
     command -v llama-server || true
 }
-server_version() {  # one line, e.g. "version: 1.0.0-dev (build 12602, commit 418fe97b5)"
-    local bin; bin="$(server_bin)"
-    [ -n "$bin" ] && "$bin" --version 2>&1 | head -1 || echo "unknown"
+server_version() {  # [BIN] → one line, e.g. "version: 1.0.0-dev (build 12602, commit 418fe97b5)"
+    local bin; bin="${1:-$(server_bin)}"
+    if [ -n "$bin" ] && [ -x "$bin" ]; then "$bin" --version 2>&1 | head -1; else echo "unknown"; fi
 }
+# Executable behind a live pid (Linux /proc, else ps comm= which macOS fills
+# with the full path) — status must describe the process that is serving,
+# not the binary the next serve would pick.
+pid_exe() { readlink "/proc/$1/exe" 2>/dev/null || ps -p "$1" -o comm= 2>/dev/null || true; }
 
 # Alive AND actually llama-server — a recycled pid must never be killable.
 pid_alive() {
@@ -282,7 +286,8 @@ cmd_status() {
             else
                 echo "localllm: serving $MODEL_ALIAS on http://$HOST:$PORT (pid $pid)"
             fi
-            echo "localllm: server $(server_version) — $(server_bin)"
+            local exe; exe="$(pid_exe "$pid")"
+            echo "localllm: server $(server_version "$exe") — ${exe:-?}"
             return 0
         fi
         echo "localllm: server alive (pid $pid) but HTTP not ready on $HOST:$PORT (model still loading?)"
